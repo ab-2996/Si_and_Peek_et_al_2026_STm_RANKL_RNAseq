@@ -1,0 +1,162 @@
+---
+title: "RANKL_Splicing"
+output: html_document
+date: "2025-01-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Packages
+
+```{r, results='hide'}
+library(SpliceWiz)
+library(DESeq2)
+library(tidyverse)
+```
+
+## Build SpliceWiz Reference
+
+```{r}
+ref_path <- file.path('splicewiz/ref')
+fasta_path = 'Mus_musculus.GRCm39.dna_rm.primary_assembly.fa'
+gtf_path = 'Mus_musculus.GRCm39.113.gtf'
+
+buildRef(
+    reference_path = ref_path,
+    fasta = fasta_path,
+    gtf = gtf_path,
+    ontologySpecies = "Mus musculus"
+)
+```
+
+## Process BAM Files
+
+```{r}
+align_directory<-"RNAseq_Preprocess/data/aligned"
+bams <- findBAMS(align_directory, level = 0)
+
+pb_path <- file.path('splicewiz/pb_output')
+processBAM(
+    bamfiles = bams$path,
+    sample_names = bams$sample,
+    reference_path = ref_path,
+    output_path = pb_path,
+    n_threads = 8
+    )
+```
+
+## Collate Data
+
+```{r}
+expr <- findSpliceWizOutput(pb_path)
+
+nxtse_path <- file.path('splicewiz/NxtSE_output')
+collateData(
+    Experiment = expr,
+    reference_path = ref_path,
+    output_path = nxtse_path,
+    n_threads = 8
+)
+```
+
+
+```{r}
+se <- makeSE(nxtse_path)
+```
+
+```{r}
+colData(se)$condition <- expr$condition
+```
+
+## Filter Low Confidence Alternative Splice Events
+
+```{r}
+se.filtered <- se[applyFilters(se),]
+```
+
+## Differential Alt. Splicing Analysis with DESeq2
+
+```{r}
+res_DESeq <- ASE_DESeq(
+    se = se.filtered,
+    test_factor = "condition",
+    test_nom = "4h_STm_100",
+    test_denom = "4h_STm_0",
+    n_threads = 8
+)
+```
+
+## Filter out low delta-PSI (change in "percent spliced in") events.
+
+```{r}
+res_DESeq_Filt <- res_DESeq[res_DESeq$abs_deltaPSI > 0.05,]
+```
+
+
+## Plot Volcano Plot for Given Condition
+
+```{r}
+ggplot(res_DESeq_Filt,
+        aes(x = log2FoldChange, y = -log10(padj))) + 
+    geom_point() +
+    labs(title = "Differential analysis - 4h_STm_100 vs 4h_STm_0",
+         x = "Log2-fold change", y = "Adj. P-value (-log10)")
+```
+
+
+```{r}
+
+# Set up list of comparisons, numerator first, denominator second
+comp_list = list(
+  list("4h_STm_100", "4h_STm_0"),
+  list("24h_STm_100", "24h_STm_0"),
+  list("4h_STm_0", "4h_mock_0"),
+  list("4h_mock_100", "4h_mock_0"),
+  list("24h_mock_100", "24h_mock_0"),
+  list("24h_STm_100", "24h_mock_100"),
+  list("24h_STm_100", "4h_STm_100")
+)
+
+for (x in comp_list) {
+
+  # Run DESeq 2 on Comparison of Interest
+  res_DESeq <- ASE_DESeq(
+      se = se.filtered,
+      test_factor = "condition",
+      test_nom = x[[1]],
+      test_denom = x[[2]],
+      n_threads = 8
+  )
+  
+  # Filter to splice events with delta-PSI > 5% 
+  res_DESeq_Filt <- res_DESeq[res_DESeq$abs_deltaPSI > 0.05,]
+  
+  # Save to file for later interpretation
+  write.csv(res_DESeq_Filt, file=paste0(x[[1]],"_over_",x[[2]],".csv"))
+
+}
+```
+
+
+
+
+## Setup Gene Ontology
+
+```{r}
+onto_ref_path <- file.path('splicewiz/ref')
+ontology <- viewGO(onto_ref_path)
+head(ontology)
+```
+
+
+```{r}
+go_byASE <- goASE(
+  enrichedEventNames = res_DESeq$EventName[1:10],
+  universeEventNames = NULL,
+  se = se
+)
+head(go_byASE)
+```
+

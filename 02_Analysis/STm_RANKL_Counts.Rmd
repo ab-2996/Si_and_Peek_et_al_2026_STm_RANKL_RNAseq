@@ -1,0 +1,221 @@
+---
+title: "Clara RANKL RNAseq Analysis"
+output:
+  html_notebook: default
+  pdf_document: default
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+**Updated by AJB Dec 18 2024**
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook of
+Andrew's work on ____________
+
+
+An diagram of the overall RNAseq workflow is shown below. Steps in
+yellow were completed prior to this notebook. Steps in light blue are
+completed below. Teal squares represent intermediate files generated
+throughout the pipeline.
+
+![]
+(RNASeq_Pipeline.png)
+
+**Required Files For this Notebook**
+
+-   The mapped reads, stored as *.bam* files.
+-   The reference genome, converted to *.gtf* format.
+
+### RNAseq Counts and Differential Expression
+
+Begin by installing and loading packages. The RNAseq analysis uses the
+package
+[Rsubread](https://bioconductor.org/packages/release/bioc/vignettes/Rsubread/inst/doc/SubreadUsersGuide.pdf)
+to generate mRNA counts for each gene. Then, this pipeline uses
+[DESeq2](https://bioconductor.org/packages/release/bioc/manuals/DESeq2/man/DESeq2.pdf)
+in order to determine differential expression of genes.
+
+```{r}
+# IF INSTALLATION IS NECESSARY
+# if (!require("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install("Rsubread")
+# BiocManager::install("DESeq2")
+# BiocManager::install("apeglm")
+# BiocManager::install("biomaRt")
+
+# Load Packages
+library(tidyverse)
+library(Rsubread)
+library(DESeq2)
+library(apeglm)
+library(ggbeeswarm)
+library(biomaRt)
+```
+
+Access the aligned reads (SAM format) and run `Rsubread-featureCounts`
+to determine how many RNA reads align to each gene.
+
+```{r}
+# Generate list of SAM files for featureCounts to use.
+align_directory<-"RNAseq_Preprocess/data/aligned"
+files<-list.files(path=align_directory, full.names=TRUE, pattern="\\.bam$")
+
+# Run featureCounts on each file.
+counts <- featureCounts(files=files,
+                        isGTFAnnotationFile=TRUE,
+                        annot.ext="Mus_musculus.GRCm39.113.gtf",
+                        GTF.featureType="exon",
+                        GTF.attrType="gene_id",
+                        isPairedEnd=TRUE,
+                        genome="Mus_musculus.GRCm39.dna_rm.primary_assembly.fa",
+                        minFragLength=50,
+                        nthreads=8,
+                        )
+
+```
+
+Now save the featureCounts object to file. This .txt file will be a
+matrix with each gene, and the number of assigned counts from each input file.
+
+This is a savepoint - and I've transferred this data to the INF drive. I
+will not upload the .fastq or .sam files to the INF drive to save \>
+20GB of space. As mentioned above the raw data is all available in the
+SRA, and my preprocessing pipeline is reproducible in Snakemake.
+
+```{r}
+# Write the featureCounts object to a .txt file.
+# The lapply function removes weird footers from gene names.
+write.table(
+  x=data.frame(counts$annotation["GeneID"],
+    counts$counts,
+    stringsAsFactors=FALSE) %>%
+    lapply(gsub, pattern='.t01', replacement='') %>%
+    lapply(gsub, pattern='.r01', replacement=''),
+  file="counts.txt",
+  quote=FALSE,
+  sep="\t",
+  row.names=FALSE)
+```
+
+Read in the counts matrix and load into DESeq2.
+
+```{r}
+# Import counts file as well as column data (which links SRA acquisition number with experimental condition)
+cts <- as.matrix(read.table("counts.txt",sep="\t", header=TRUE))
+coldata <- as.matrix(read.table("seq_reference.txt", sep="\t", header=TRUE))
+
+# Extract counts & Ignore first column (geneID) and first row (sample names)
+countDataMatrix <- as.matrix(cts[-1,-1])
+# Convert to integer
+mode(countDataMatrix) <- "integer"
+# Set rownames to geneIDs
+rownames(countDataMatrix) <- cts[-1,1]
+# Set colnames to sample names
+colnames(countDataMatrix) <- colnames(cts)[-1]   
+
+dds <- DESeqDataSetFromMatrix(countData=countDataMatrix, 
+                              colData=coldata,
+                              design = ~ condition)
+```
+
+Now a brief filtering step to remove rows that have fewer than 10 reads.
+
+```{r}
+# Filter rows with less than 10 reads.
+smallestGroupSize <- 3
+keep <- rowSums(counts(dds) >= 10) >= smallestGroupSize
+dds <- dds[keep,]
+```
+
+Now we run DESeq to determine differentially-expressed genes.
+
+```{r}
+# Run DESeq2 for each of the comparisons:
+dds$condition = relevel(dds$condition, ref = "4h_mock_0")
+dds_4h_M_0 <- DESeq(dds)
+
+```
+```{r}
+resultsNames(dds_4h_M_0)
+```
+Now we use a log fold change (LFC) shrinkage correction to improve gene
+ranks. This was published in [*Bioinformatics* in 2018.](https://doi.org/10.1093/bioinformatics/bty895)
+
+```{r}
+# Use the LFC adjustment for each group.
+Stm_4h_0LFC <- lfcShrink(dds_4h_M_0,coef="condition_4h_STm_0_vs_4h_mock_0", type="apeglm")
+```
+
+Now we can preview the summarized data, one by one. These data are
+listed in gene order to begin with. These commands also save the
+resulting data as *.csv* files for future reference.
+
+This first block also imports a reference *.csv* generated from the `gene_list.ipynb` Python notebook. This notebook reads the *.gb* file and relates the locus id (i.e. "BSR30_RS00010") to gene name and gene product. We will merge this reference with the output folder to facilitate plotting.
+
+**Rel-Syn**
+
+```{r}
+grcm39 = useEnsembl(biomart='ensembl', dataset="mmusculus_gene_ensembl")
+
+attributeList <- listAttributes(grcm39)
+```
+
+
+```{r}
+all_genes <- getBM(attributes=c('ensembl_gene_id','gene_biotype','external_gene_name','chromosome_name','start_position','end_position'), mart = grcm39)
+
+write.table(all_genes, file="grcm39_ref.txt",
+  quote=FALSE,
+  sep="\t",
+  row.names=FALSE)
+```
+
+
+
+```{r}
+# Import reference .csv.
+ref <- read.csv("Sau_HG001_reference.csv")
+ref <- as.matrix(ref)
+# Set locus tags (first column) as row names.
+refMatrix <- ref[,-1]
+rownames(refMatrix) <- ref[,1]
+
+# Create matrix from Rel-Syn results.
+Syn <- as.matrix(relSynLFC)
+# Merge matrix with reference.
+SynRef <- merge(refMatrix,Syn,by="row.names",all.x=TRUE) %>%
+  as.data.frame() %>%
+  drop_na()
+
+# Rename "row.names" column to Locus
+colnames(SynRef)[colnames(SynRef)=="Row.names"] <- "locus"
+
+# Save .csv for Rel-Syn results.
+write.csv(SynRef, file="RelSyn_results.csv", row.names=FALSE)
+SynRef
+```
+
+### Plotting
+
+Start with a volcano plot to visualize up- and downregulation.
+```{r}
+
+SynRefSignif <- transform(SynRef, signif= ifelse(log2FoldChange>=log2(3) | log2FoldChange<=-log2(3) & padj<.001, TRUE, FALSE))
+
+up = length(which(SynRefSignif$signif == TRUE & SynRefSignif$log2FoldChange>=log2(3)))
+down = length(which(SynRefSignif$signif == TRUE & SynRefSignif$log2FoldChange<=-log2(3)))
+
+plot <- ggplot(data=SynRefSignif, aes(x=log2FoldChange, y=-log10(padj), color=signif)) +
+  geom_point()+
+  scale_color_manual(values = c("FALSE"="grey", "TRUE"="black")) +
+  theme_classic() +
+  labs(title="Differentially Expressed Genes after Rel-Syn Activation",
+       subtitle= paste(up,"Genes Upregulated,",down,"Genes Downregulated"),
+       color="Significance")
+
+plot
+
+```
+

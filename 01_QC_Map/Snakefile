@@ -1,0 +1,62 @@
+#####################################################
+##                                                 ##
+##            Bacterial RNAseq Pipeline            ##
+##                 AJB - Oct 2024                  ##
+##                                                 ##
+#####################################################
+
+from snakemake.utils import min_version
+import pandas as pd
+
+min_version("3.2")
+
+# Declare config file.
+configfile: "config/config.yaml"
+adapter_file = config["path_to_adapter"]
+bowtie2_index = config["path_to_index"]
+#seq_reference = config["path_to_reference"]
+
+# Create Python dictionary to rename runs - especially useful if using SRA data.
+#ref = pd.read_csv(seq_reference, delimiter="\t", header = None)
+#ref_dict = dict(zip(ref[0], ref[1]))
+
+#all_input = []
+#for key, values in ref_dict.items():
+#    for value in values:
+#        all_input.append(f"{value}.fastq")
+
+# Define groups based on input data. 
+READS = ['1', '2']
+
+GROUPS, = glob_wildcards('data/trim/{group}_qc.1.fastq.gz')
+#TWOS, = glob_wildcards('data/raw/{in_file}.2.fastq')
+
+rule all: 
+   input: expand("data/aligned/{group}-Aligned.sortedByCoord.out.bam", group=GROUPS)
+
+# FastP - Quality Control, Trimming, of RNAseq Reads
+rule fastp:
+    input: 
+        reads1i="data/raw/{group}.1.fastq.gz",
+        reads2i="data/raw/{group}.2.fastq.gz"
+    output: 
+        reads1o="data/trim/{group}_qc.1.fastq.gz",
+        reads2o="data/trim/{group}_qc.2.fastq.gz"
+    conda: "fastp"
+    params: sample_name = "qc_data/{group}.html"
+    threads: 4
+    shell: "fastp -i {input.reads1i} -o {output.reads1o} -I {input.reads2i} -O {output.reads2o} -w {threads} -h {params.sample_name} --json /dev/null"
+
+# Bowtie2 - Read Mapping of Reads to Reference Genome
+rule STAR:
+    input:
+        reads1="data/trim/{group}_qc.1.fastq.gz",
+        reads2="data/trim/{group}_qc.2.fastq.gz"    
+    output: "data/aligned/{group}-Aligned.sortedByCoord.out.bam"
+    conda: "star"
+    params: 
+        index = bowtie2_index,
+        gtf = "",
+        overhang = 99
+    threads: 8
+    shell: "STAR --runThreadN {threads} --genomeDir {params.index} --readFilesIn {input.reads1} {input.reads2} --readFilesCommand zcat --sjdbGTFfile --outSAMtype BAM SortedByCoordinate --outTmpDir ~/{wildcards.group}_tmp --outFileNamePrefix data/aligned/{wildcards.group}-" 

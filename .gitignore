@@ -1,0 +1,9 @@
+01_QC_Map/data
+01_QC_Map/.snakemake/
+01_QC_Map/_STARtmp
+Mus_musculus.GRCm39.113.gtf
+Mus_musculus.GRCm39.dna_rm.primary_assembly.fa
+02_Analysis/AltSplicing
+02_Analysis/Counts
+02_Analysis/.Rhistory
+02_Analysis/*.txt
