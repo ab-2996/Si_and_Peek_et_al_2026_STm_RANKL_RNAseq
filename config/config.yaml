@@ -1,0 +1,10 @@
+
+# Where is your .fasta file with your adapter sequence(s)?
+# Type: String
+# Default = ""
+path_to_adapter: "data/adapter.fasta"
+
+# Where is your index folder for STAR?
+# Type: String
+# Default = ""
+path_to_index: "02_Mapping/index"
