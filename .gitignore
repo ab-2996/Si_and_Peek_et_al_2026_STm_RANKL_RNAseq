@@ -1,3 +1,4 @@
+00_Raw
 01_QC/data
 01_QC/.snakemake/
 02_Mapping/_STARtmp
