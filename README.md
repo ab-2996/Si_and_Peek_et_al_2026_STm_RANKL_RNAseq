@@ -33,8 +33,7 @@ snakemake --snakefile 01_QC/Snakefile --use-conda --cores 8
 
 Generate [STAR](https://github.com/alexdobin/STAR) Reference from Ensembl Files
 ---
-First, download the latest versions of the GRCm39 assembly (.fa) and annotation (.gtf) from ENSEMBL.
-
+First, download the latest versions of the GRCm39 assembly (.fa) and annotation (.gtf) from ENSEMBL. The attached bash script will create an appropriate subdirectory
 ``` bash
 bash scripts/get_reference.sh
 ```
