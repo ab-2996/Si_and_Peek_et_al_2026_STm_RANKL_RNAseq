@@ -1,0 +1,33 @@
+###############################################
+##                                           ##
+##         Host Cell RNAseq Pipeline         ##
+##        Step 2: STAR - Read Mapping        ##
+##              AJB - Jan 2025               ##
+##                                           ##
+###############################################
+
+from snakemake.utils import min_version
+min_version("3.2")
+
+# Declare config file.
+configfile: "config/config.yaml"
+STAR_index = config["path_to_index"]
+
+# Define groups based on input data. 
+# This is extracting just the group name (i.e. "CP-1") from the available files.
+GROUPS, = glob_wildcards("01_QC/qc/{group}_qc.1.fastq.gz")
+
+rule all: 
+   input: expand("data/aligned/{group}-Aligned.sortedByCoord.out.bam", group=GROUPS)
+
+# STAR - Splice-aware Read Mapping to Reference Genome
+rule STAR:
+    input:
+        reads1="01_QC/qc/{group}_qc.1.fastq.gz",
+        reads2="01_QC/qc/{group}_qc.2.fastq.gz"    
+    output: "02_Mapping/aligned/{group}-Aligned.sortedByCoord.out.bam"
+    conda: "envs/star.yml"
+    params: 
+        index = STAR_index
+    threads: 8
+    shell: "STAR --runThreadN {threads} --genomeDir {params.index} --readFilesIn {input.reads1} {input.reads2} --readFilesCommand zcat --outSAMtype BAM SortedByCoordinate --outTmpDir ~/{wildcards.group}_tmp --outFileNamePrefix 02_Mapping/aligned/{wildcards.group}-" 
