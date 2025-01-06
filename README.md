@@ -1,33 +1,52 @@
-*Salmonella* Typhimurium - RANKL Treatment RNAseq Analysis
+*S.* Tm - RANKL Treatment RNAseq Analysis
 ===
-This repository contains RNA Sequencing analysis from Clara Si and Chris Peek. Andrew Beaudoin re-ran the analysis in 2024-25 
-
+This repository contains RNA Sequencing analysis for Clara Si and Chris Peek. The first-pass analysis (unpublished) used pseudo-alignments to generate counts and investigate pathway regulation. Andrew Beaudoin ran the analysis in 2024-25 with two goals:
+* Map reads to full reference genome (GRCm39) and verify initial GO/Pathway Analysis findings
+* Investigate alternative splicing events, specifically in NF-κB pathway
 
 Experimental Design
 ---
-
+*To-do, verify with Clara*
 
 Analysis
 ===
 All analysis was performed on a Windows computer running Windows Subsystem for Linux 2.
-The computer has an x86_64 processor, 8 core CPU, and 48GB RAM.
+The computer has an x86_64 processor, 8-core AMD Ryzen 7 CPU, and 48GB RAM.
 
-1. Run [fastp](https://github.com/OpenGene/fastp) for QC and Adapter Trimming
----
+This analysis uses [Snakemake](https://snakemake.readthedocs.io/en/stable/) to run QC and Read Mapping steps on the paired-end reads. 
+
+To install the same version of Snakemake (v8.16.0), use:
 ``` bash
-snakemake --snakefile 01_QC/Snakefile --directory 01_QC --use-conda --cores 8
+conda env create -f envs/snakemake.yml
 ```
 
-2. Generate [STAR](https://github.com/alexdobin/STAR) Reference From Ensembl Files
----
+Or install the latest version with:
 ``` bash
-STAR --runMode genomeGenerate --genomeDir {} --genomeFastaFiles {} --sjdbGTFfile --sjdbOverhang
+conda create -c conda-forge -c bioconda --name snakemake snakemake
 ```
 
-3. Map Reads with Splice-Aware Aligner [STAR](https://github.com/alexdobin/STAR)
+Run [fastp](https://github.com/OpenGene/fastp) for QC and Adapter Trimming
 ---
 ``` bash
-snakemake --snakefile 02_Mapping/Snakefile --directory 02_Mapping --use-conda --cores 8
+snakemake --snakefile 01_QC/Snakefile --use-conda --cores 8
+```
+
+Generate [STAR](https://github.com/alexdobin/STAR) Reference from Ensembl Files
+---
+First, download the latest versions of the GRCm39 assembly (.fa) and annotation (.gtf) from ENSEMBL.
+
+``` bash
+bash scripts/get_reference.sh
+```
+
+``` bash
+STAR --runMode genomeGenerate --genomeDir {} --genomeFastaFiles {} --sjdbGTFfile --sjdbOverhang 99
+```
+
+Map Reads with Splice-Aware Aligner [STAR](https://github.com/alexdobin/STAR)
+---
+``` bash
+snakemake --snakefile 02_Mapping/Snakefile --use-conda --cores 8
 ```
 
 ---
