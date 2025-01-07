@@ -9,6 +9,10 @@
 from snakemake.utils import min_version
 min_version("3.2")
 
+# Declare config file.
+configfile: "config/config.yaml"
+compression_val = config["qc_compression"]
+
 # Define groups based on input data. 
 # This is extracting just the group name (i.e. "CP-1") from the available files.
 GROUPS, = glob_wildcards("00_Raw/{group}.1.fastq.gz")
@@ -29,6 +33,6 @@ rule fastp:
     params:
         sample_html = "01_QC/qc_data/{group}.html",
         sample_name = "{group}",
-        compression = 5
+        compression = compression_val
     threads: 4
-    shell: "fastp --in1 {input.reads1i} --out1 {output.reads1o} --in2 {input.reads2i} --out2 {output.reads2o} -w {threads} --detect_adapter_for_pe --correction --trim_poly_x -z {params.compression} -h {params.sample_html} --json /dev/null --report_title {params.sample_name}"
+    shell: "fastp --in1 {input.reads1i} --out1 {output.reads1o} --in2 {input.reads2i} --out2 {output.reads2o} -w {threads} --detect_adapter_for_pe --correction --trim_poly_x --compression {params.compression} --html {params.sample_html} --json /dev/null --report_title {params.sample_name}"
