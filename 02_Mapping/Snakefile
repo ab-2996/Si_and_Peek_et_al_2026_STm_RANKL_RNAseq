@@ -9,10 +9,6 @@
 from snakemake.utils import min_version
 min_version("3.2")
 
-# Declare config file.
-configfile: "config/config.yaml"
-STAR_index = config["path_to_index"]
-
 # Define groups based on input data. 
 # This is extracting just the group name (i.e. "CP-1") from the available files.
 GROUPS, = glob_wildcards("01_QC/qc/{group}_qc.1.fastq.gz")
@@ -28,6 +24,6 @@ rule STAR:
     output: "02_Mapping/aligned/{group}-Aligned.sortedByCoord.out.bam"
     conda: "envs/star.yml"
     params: 
-        index = STAR_index
+        index = "02_Mapping/index"
     threads: 8
     shell: "STAR --runThreadN {threads} --genomeDir {params.index} --readFilesIn {input.reads1} {input.reads2} --readFilesCommand zcat --outSAMtype BAM SortedByCoordinate --outTmpDir ~/{wildcards.group}_tmp --outFileNamePrefix 02_Mapping/aligned/{wildcards.group}-" 

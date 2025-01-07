@@ -1,10 +1,7 @@
+#### 01_QC
 
-# Where is your .fasta file with your adapter sequence(s)?
-# Type: String
-# Default = ""
-path_to_adapter: "data/adapter.fasta"
-
-# Where is your index folder for STAR?
-# Type: String
-# Default = ""
-path_to_index: "02_Mapping/index"
+# FastP automatically compresses data when the output has a ".gz" extension.
+# How much do you want to compress? Range from 1 (least compressed) to 9 (most compressed).
+# Type: Integer
+# Default = 6
+qc_compression: 6
