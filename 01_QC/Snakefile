@@ -27,7 +27,8 @@ rule fastp:
         reads2o="01_QC/qc/{group}_qc.2.fastq.gz"
     conda: "envs/fastp.yml"
     params:
-        sample_name = "01_QC/qc_data/{group}.html",
-        compression = 6
+        sample_html = "01_QC/qc_data/{group}.html",
+        sample_name = "{group}",
+        compression = 5
     threads: 4
-    shell: "fastp -i {input.reads1i} -o {output.reads1o} -I {input.reads2i} -O {output.reads2o} -w {threads} --detect_adapter_for_pe -z {params.compression} -h {params.sample_name} --json /dev/null"
+    shell: "fastp --in1 {input.reads1i} --out1 {output.reads1o} --in2 {input.reads2i} --out2 {output.reads2o} -w {threads} --detect_adapter_for_pe --correction --trim_poly_x -z {params.compression} -h {params.sample_html} --json /dev/null --report_title {params.sample_name}"
