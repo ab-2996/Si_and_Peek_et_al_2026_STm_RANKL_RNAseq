@@ -49,7 +49,7 @@ in order to determine differential expression of genes.
 library(tidyverse)
 library(Rsubread)
 library(DESeq2)
-library(apeglm)
+library(ashr)
 library(ggbeeswarm)
 library(biomaRt)
 ```
@@ -102,9 +102,11 @@ write.table(
 Read in the counts matrix and load into DESeq2.
 
 ```{r}
-# Import counts file as well as column data (which links SRA acquisition number with experimental condition)
+# Import counts file
 cts <- as.matrix(read.table("counts.txt",sep="\t", header=TRUE))
-coldata <- as.matrix(read.table("seq_reference.txt", sep="\t", header=TRUE))
+# Import column data, saved as tab-delimited .txt, and remove spaces that head some values
+coldata <- as.matrix(read.table("seq_reference.txt", sep="\t", header=TRUE)) %>%
+  trimws()
 
 # Extract counts & Ignore first column (geneID) and first row (sample names)
 countDataMatrix <- as.matrix(cts[-1,-1])
@@ -117,7 +119,7 @@ colnames(countDataMatrix) <- colnames(cts)[-1]
 
 dds <- DESeqDataSetFromMatrix(countData=countDataMatrix, 
                               colData=coldata,
-                              design = ~ condition)
+                              design = ~ c(condition,time,infec,rankl))
 ```
 
 Now a brief filtering step to remove rows that have fewer than 10 reads.
@@ -129,32 +131,62 @@ keep <- rowSums(counts(dds) >= 10) >= smallestGroupSize
 dds <- dds[keep,]
 ```
 
-Now we run DESeq to determine differentially-expressed genes.
+# Multifactor Investigation
 
 ```{r}
+# Copy DESeq DataSet (DDS) to a new one for multifactor investigation
+ddsMF <- dds
+
+design(ddsMF) <- formula(~ rankl + time + infec)
+ddsMF <- DESeq(ddsMF)
+```
+
+
+```{r}
+resMF <- results(ddsMF)
+head(resMF)
+```
+
+```{r}
+resMFType <- results(ddsMF,
+                     contrast=c("rankl", "0", "100"))
+head(resMFType)
+```
+
+```{r}
+resMFType <- results(ddsMF,
+                     contrast=c("condition", "4h_mock_0", "4h_STm_0"))
+head(resMFType)
+```
+
+Now we run DESeq to determine differentially-expressed genes between individual conditions.
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData=countDataMatrix, 
+                              colData=coldata,
+                              design = ~ condition)
+
 # Run DESeq2 for each of the comparisons:
-dds$condition = relevel(dds$condition, ref = "4h_mock_0")
-dds_4h_M_0 <- DESeq(dds)
+dds <- DESeq(dds)
+```
 
-```
-```{r}
-resultsNames(dds_4h_M_0)
-```
 Now we use a log fold change (LFC) shrinkage correction to improve gene
 ranks. This was published in [*Bioinformatics* in 2018.](https://doi.org/10.1093/bioinformatics/bty895)
 
 ```{r}
 # Use the LFC adjustment for each group.
-Stm_4h_0LFC <- lfcShrink(dds_4h_M_0,coef="condition_4h_STm_0_vs_4h_mock_0", type="apeglm")
+ddsLFC <- lfcShrink(dds, contrast=c("condition", "4h_STm_0", "4h_mock_0"), type="ashr")
 ```
 
-Now we can preview the summarized data, one by one. These data are
-listed in gene order to begin with. These commands also save the
-resulting data as *.csv* files for future reference.
+Check the available comparisons relative to a group, in this case the mock-infected non-RANKL-treated group at 4h.
 
-This first block also imports a reference *.csv* generated from the `gene_list.ipynb` Python notebook. This notebook reads the *.gb* file and relates the locus id (i.e. "BSR30_RS00010") to gene name and gene product. We will merge this reference with the output folder to facilitate plotting.
+```{r}
+summary(ddsLFC)
+```
 
-**Rel-Syn**
+We will use the package biomaRt to reference the Ensembl database and relates the Ensembl gene id (i.e. "ENSMUSG00000064336") to a more understandable gene name. We will merge this reference with the output folder to facilitate plotting.
+
+This first block checks biomaRt for all possible attributes available in the *Mus musculus* database.
 
 ```{r}
 grcm39 = useEnsembl(biomart='ensembl', dataset="mmusculus_gene_ensembl")
@@ -162,9 +194,18 @@ grcm39 = useEnsembl(biomart='ensembl', dataset="mmusculus_gene_ensembl")
 attributeList <- listAttributes(grcm39)
 ```
 
+Now we will make the reference table with:
+- Ensembl Gene Name
+- Gene Type (i.e. coding, lncRNA, etc)
+- Gene Name (i.e. "sox9")
+- Chromosome
+- Start Position
+- Stop Position
+
+It will be saved as "grcm39_ref.txt" for future uses and so we don't need to access biomaRt the whole time.
 
 ```{r}
-all_genes <- getBM(attributes=c('ensembl_gene_id','gene_biotype','external_gene_name','chromosome_name','start_position','end_position'), mart = grcm39)
+all_genes <- getBM(attributes=c('ensembl_gene_id','gene_biotype','external_gene_name', 'entrezgene_id','chromosome_name','start_position','end_position'), mart = grcm39)
 
 write.table(all_genes, file="grcm39_ref.txt",
   quote=FALSE,
@@ -172,30 +213,148 @@ write.table(all_genes, file="grcm39_ref.txt",
   row.names=FALSE)
 ```
 
-
+This block reads in the reference as saved from file.
 
 ```{r}
-# Import reference .csv.
-ref <- read.csv("Sau_HG001_reference.csv")
-ref <- as.matrix(ref)
+ref <- as.matrix(read.table("grcm39_ref.txt",sep="\t", header=TRUE)) %>%
+  trimws()
+```
+
+```{r}
 # Set locus tags (first column) as row names.
 refMatrix <- ref[,-1]
 rownames(refMatrix) <- ref[,1]
 
-# Create matrix from Rel-Syn results.
-Syn <- as.matrix(relSynLFC)
+# Create matrix from results.
+resMatrix <- as.matrix(ddsLFC)
 # Merge matrix with reference.
-SynRef <- merge(refMatrix,Syn,by="row.names",all.x=TRUE) %>%
+resFull <- merge(refMatrix,resMatrix ,by="row.names",all.x=TRUE) %>%
   as.data.frame() %>%
   drop_na()
 
 # Rename "row.names" column to Locus
-colnames(SynRef)[colnames(SynRef)=="Row.names"] <- "locus"
+colnames(resFull)[colnames(resFull)=="Row.names"] <- "locus"
 
 # Save .csv for Rel-Syn results.
-write.csv(SynRef, file="RelSyn_results.csv", row.names=FALSE)
-SynRef
+#write.csv(S_4_0, file="STm_4h_0RANKL.csv", row.names=FALSE)
 ```
+
+```{r}
+library(pathview)
+library(gage)
+library(gageData)
+
+data(kegg.sets.mm)
+data(sigmet.idx.mm)
+
+kegg.sets.mm = kegg.sets.mm[sigmet.idx.mm]
+head(kegg.sets.mm, 3)
+```
+
+```{r}
+foldChange = resFull$log2FoldChange
+names(foldChange) = resFull$entrezgene_id
+head(foldChange)
+```
+
+Now run gage on the DESeq2 dataset and examine regulation as sets of KEGG-annotated pathways.
+
+```{r}
+keggres = gage(foldChange, gsets=kegg.sets.mm, same.dir=TRUE)
+lapply(keggres, head)
+```
+
+```{r}
+pathview(gene.data=foldChange, species='mmu', pathway.id="04620", out.suffix = "STm4.0-Mock4.0")
+```
+
+```{r}
+ref <- as.matrix(read.table("grcm39_ref.txt",sep="\t", header=TRUE)) %>%
+  trimws()
+
+# Set locus tags (first column) as row names.
+refMatrix <- ref[,-1]
+rownames(refMatrix) <- ref[,1]
+
+# Setup pathway analysis matrix
+keggNames = names(kegg.sets.mm)
+KeggPathDF = data.frame(matrix(ncol = 0, nrow = length(keggNames)))
+rownames(KeggPathDF) = keggNames
+
+for (condition in c('4h_STm_0', '4h_STm_100', '4h_mock_100', 
+                    '24h_STm_0', '24h_STm_100', '24h_mock_0', '24h_mock_100')) {
+  
+  # Use the LFC adjustment for each group.
+  ddsLFC = lfcShrink(dds, contrast=c("condition", condition, "4h_mock_0"), type="ashr")
+  
+  # Create matrix from results.
+  resMatrix = as.matrix(ddsLFC)
+  
+  # Merge matrix with reference.
+  resFull = merge(refMatrix,resMatrix,by=0,all.x=TRUE) %>%
+    as.data.frame() %>%
+    drop_na()
+  
+  # Rename "row.names" column to Locus
+  colnames(resFull)[colnames(resFull)=="Row.names"] <- "locus"
+  
+  # Save .csv for individual differential expression results.
+  write.csv(resFull, file=paste0(condition,"_vs_4hMock.csv"), row.names=FALSE)
+  
+  # Pathway analysis
+  foldChange = resFull$log2FoldChange
+  names(foldChange) = resFull$entrezgene_id
+  keggres = gage(foldChange, gsets=kegg.sets.mm, same.dir=TRUE)
+
+  tempKegg = data.frame(keggres$stats)
+  colnames(tempKegg) <- c('drop', condition)
+  tempKegg <- tempKegg[ , condition, drop = FALSE]
+
+  KeggPathDF <- merge(KeggPathDF, tempKegg, by='row.names',all.x=TRUE)
+  KeggPathDF <- data.frame(KeggPathDF, row.names = 1)
+  
+  #write.csv(KeggPathDF, file="KEGG_4hmock0ref.csv")
+}
+```
+
+```{r}
+# Setup pathway analysis matrix
+keggNames = names(kegg.sets.mm)
+KeggPathDF = data.frame(matrix(ncol = 0, nrow = length(keggNames)))
+rownames(KeggPathDF) = keggNames
+
+tempKegg = data.frame(keggres$stats)
+colnames(tempKegg) <- c('drop', condition)
+tempKegg <- tempKegg[ , condition, drop = FALSE]
+
+KeggPathDF <- merge(KeggPathDF, tempKegg, by='row.names',all.x=TRUE)
+rownames(KeggPathDF) <- KeggPathDF$Row.names
+KeggPathDF[,1] <- NULL
+```
+
+
+
+Now we can preview the summarized data, one by one. These data are
+listed in gene order to begin with. These commands also save the
+resulting data as *.csv* files for future reference.
+
+----
+
+
+
+```{r}
+pcaData <- plotPCA(vsd, intgroup=c("condition", "type"), returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, color=condition, shape=type)) +
+  geom_point(size=3) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+
+pcaData
+```
+
+
 
 ### Plotting
 
@@ -218,4 +377,7 @@ plot <- ggplot(data=SynRefSignif, aes(x=log2FoldChange, y=-log10(padj), color=si
 plot
 
 ```
+
+
+
 
