@@ -22,7 +22,7 @@ rule STAR:
         reads1="01_QC/qc/{group}_qc.1.fastq.gz",
         reads2="01_QC/qc/{group}_qc.2.fastq.gz"    
     output: "02_Mapping/aligned/{group}-Aligned.sortedByCoord.out.bam"
-    conda: "envs/star.yml"
+    conda: "star"
     params: 
         index = "02_Mapping/index"
     threads: 8
