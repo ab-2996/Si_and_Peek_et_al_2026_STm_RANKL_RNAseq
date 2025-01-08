@@ -1,6 +1,5 @@
 .snakemake/
 01_QC/data
-01_QC/
 02_Mapping/_STARtmp
 03_Analysis/AltSplicing
 03_Analysis/Counts
