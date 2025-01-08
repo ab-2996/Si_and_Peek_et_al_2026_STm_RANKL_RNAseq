@@ -54,7 +54,7 @@ snakemake --snakefile 01_QC/Snakefile --use-conda --cores 8
 * `--trim_poly_x`
     * Because the sequencing was done on an Illumina NovaSeq machine, FastP will automatically remove poly-G motifs ([enriched in Nova and NextSeq platforms](https://support.illumina.com/content/dam/illumina-support/help/Illumina_DRAGEN_Bio_IT_Platform_v3_7_1000000141465/Content/SW/Informatics/Dragen/PolyG_Trimming_fDG.htm)), but I want to remove spurious polyA repeats as well, as these can interfere with read mapping.
 * `--compression [6]`
-    * Compresses the output slightly higher than normal, to save space on my machine. This can be changed in `config.yml`.
+    * Compresses the output slightly higher than normal, to save space on my machine. This can be changed in `config/config.yml`.
 * `--html 01_QC/qc_data/{group}.html`
     * Names HTML QC output based on the input file.
 * `--json /dev/null`
