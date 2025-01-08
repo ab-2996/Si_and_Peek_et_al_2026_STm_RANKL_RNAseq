@@ -29,7 +29,7 @@ rule fastp:
     output: 
         reads1o="01_QC/qc/{group}_qc.1.fastq.gz",
         reads2o="01_QC/qc/{group}_qc.2.fastq.gz"
-    conda: "envs/fastp.yml"
+    conda: "fastp"
     params:
         sample_html = "01_QC/qc_data/{group}.html",
         sample_name = "{group}",
