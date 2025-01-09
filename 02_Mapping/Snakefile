@@ -14,7 +14,7 @@ min_version("3.2")
 GROUPS, = glob_wildcards("01_QC/qc/{group}_qc.1.fastq.gz")
 
 rule all: 
-   input: expand("data/aligned/{group}-Aligned.sortedByCoord.out.bam", group=GROUPS)
+   input: expand("02_Mapping/aligned/{group}-Aligned.sortedByCoord.out.bam", group=GROUPS)
 
 # STAR - Splice-aware Read Mapping to Reference Genome
 rule STAR:
@@ -26,4 +26,4 @@ rule STAR:
     params: 
         index = "02_Mapping/index"
     threads: 8
-    shell: "STAR --runThreadN {threads} --genomeDir {params.index} --readFilesIn {input.reads1} {input.reads2} --readFilesCommand zcat --outSAMtype BAM SortedByCoordinate --outTmpDir ~/{wildcards.group}_tmp --outFileNamePrefix 02_Mapping/aligned/{wildcards.group}-" 
+    shell: "STAR --runThreadN {threads} --genomeDir {params.index} --readFilesIn {input.reads1} {input.reads2} --readFilesCommand zcat --twoPassMode Basic --outSAMtype BAM SortedByCoordinate --outTmpDir ~/{wildcards.group}_tmp --outFileNamePrefix 02_Mapping/aligned/{wildcards.group}-"
