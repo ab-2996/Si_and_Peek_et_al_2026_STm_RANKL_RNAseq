@@ -61,6 +61,8 @@ snakemake --snakefile 01_QC/Snakefile --use-conda --cores 8
     * Gets rid of the `.json` file.
 * `--report_title {group}`
     * Renames HTML title based on the input file. 
+* `--runThreadN 4`
+    * I set this to run quickly using 4 threads. With 8 available on my CPU, Snakemake will run two jobs at a time. **Double-check your machine's capabilities before running!**
 
 
 Generate [STAR](https://github.com/alexdobin/STAR) Reference from Ensembl Files
@@ -69,16 +71,42 @@ First, download the latest versions of the GRCm39 assembly (.fa) and annotation 
 ``` bash
 bash scripts/get_reference.sh
 ```
-Using the downloaded files, use STAR to generate genome indices for the read mapping step.
+Deactivate the active `snakemake` environment, and activate the Conda environment for STAR.
+``` bash
+conda deactivate
+conda activate star
+```
+Using the downloaded files from ENSEMBL, use STAR to generate genome indices for the read mapping step.
 ``` bash
 STAR --runMode genomeGenerate --genomeDir 02_Mapping/index --genomeFastaFiles GRCm39/Mus_musculus.GRCm39.dna_rm.primary_assembly.fa --sjdbGTFfile GRCm39/Mus_musculus.GRCm39.113.gtf --sjdbOverhang 149 --runThreadN 8
 ```
-For the index generation, I set `sjdbOverhang` to 149 as the reads are 150bp each. The recommended overhang length is (read length)-1. 
+### Parameters Used in STAR Index Generation
+* `--sjdbOverhang 149`
+    * The recommended overhang length to allow for best splice site determination is $n-1$ where $n$ is the length of reads. Therefore, I used 149 for this value.
+* `--runThreadN 8`
+    * I set this to run (relatively) quickly using 8 threads. **Double-check your machine's capabilities before running!**
 
 Map Reads with Splice-Aware Aligner [STAR](https://github.com/alexdobin/STAR)
 ---
+Re-activate Conda environment for Snakemake. The `star` environment will be called again in Snakemake.
+``` bash
+conda deactivate
+conda activate snakemake
+```
+Run Snakemake for Read Mapping. 
+
+**Note:** This is computationally intensive, and runs for ~12 hours on a machine with 8 CPU cores and 48GB of RAM. You may consider running this on a high-performance computing cluster. In that case, you may want to refer the [Snakemake documentation](https://snakemake.readthedocs.io/en/v7.19.1/executing/cluster.html) for connecting to your HPC of interest.
 ``` bash
 snakemake --snakefile 02_Mapping/Snakefile --use-conda --cores 8
 ```
+### Parameters Used in STAR Read Mapping
+* `--readFilesCommand zcat`
+    * Because the input files are [gzipped](https://www.gzip.org/), STAR needs a way to read in the files. [Zcat](https://linux.die.net/man/1/zcat) is efficient for this job.
+* `--twoPassMode Basic`
+    * Because I am interested in alternative splicing in downstream pathways, two passes of read mapping will be used to potentially detect novel splice junctions. 
+* `--outSAMtype BAM SortedByCoordinate`
+    * Outputting to a BAM file saves disk space (a hot commodity on my machine) and sorting the BAM file is handy for downstream analyses (though not necessarily required by featureCounts). 
+* `--runThreadN 8`
+    * I set this to run quickly using 8 threads. Your machine may not have 8 threads, or maybe you want to use a different number. This can be set in the `Snakefile`. **Double-check your machine's capabilities before running!**
 
 ---
