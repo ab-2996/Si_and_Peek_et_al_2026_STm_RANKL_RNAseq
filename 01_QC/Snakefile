@@ -31,7 +31,7 @@ rule fastp:
         reads2o="01_QC/qc/{group}_qc.2.fastq.gz"
     conda: "fastp"
     params:
-        sample_html = "01_QC/qc_data/{group}.html",
+        sample_html = "{group}.html",
         sample_name = "{group}",
         compression = compression_val
     threads: 4
