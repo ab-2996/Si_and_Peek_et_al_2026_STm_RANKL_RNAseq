@@ -107,7 +107,7 @@ snakemake --snakefile 02_Mapping/Snakefile --use-conda --cores 8
 * `--alignSJDBoverhangMin 4`
     * I am increasing the minimum overlap for *annotated* splice junctions to be called from the default of 3 up to 4. This is slightly more stringent and reduces potential false-positive annotated splice alignments.
 * `--alignSJoverhangMin 8`
-    * Similarly, I am increasing the minimum overlap for *un-annotated* splice junctions from the default of 5 up to 7, with the same goal of reducing false-positive novel splice alignments.
+    * Similarly, I am increasing the minimum overlap for *un-annotated* splice junctions from the default of 5 up to 8, with the same goal of reducing false-positive novel splice alignments.
 * `--outSAMtype BAM SortedByCoordinate`
     * Outputting to a BAM file saves disk space (a hot commodity on my machine) and sorting the BAM file is handy for downstream analyses (though not necessarily required by featureCounts). 
 * `--runThreadN 8`
