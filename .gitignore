@@ -1,6 +1,6 @@
 .snakemake/
-01_QC/data
 01_QC/qc
+01_QC/ignore
 02_Mapping/_STARtmp
 02_Mapping/index
 02_Mapping/aligned
