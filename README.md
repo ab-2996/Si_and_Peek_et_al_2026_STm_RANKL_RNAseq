@@ -93,7 +93,7 @@ Re-activate Conda environment for Snakemake. The `star` environment will be call
 conda deactivate
 conda activate snakemake
 ```
-Run Snakemake for Read Mapping. 
+Now run Snakemake for read mapping. 
 
 **Note:** This is computationally intensive, and runs for ~12 hours on a machine with 8 CPU cores and 48GB of RAM. You may consider running this on a high-performance computing cluster. In that case, you may want to refer the [Snakemake documentation](https://snakemake.readthedocs.io/en/v7.19.1/executing/cluster.html) for connecting to your HPC of interest.
 ``` bash
