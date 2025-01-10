@@ -104,9 +104,13 @@ snakemake --snakefile 02_Mapping/Snakefile --use-conda --cores 8
     * Because the input files are [gzipped](https://www.gzip.org/), STAR needs a way to read in the files. [Zcat](https://linux.die.net/man/1/zcat) is efficient for this job.
 * `--twoPassMode Basic`
     * Because I am interested in alternative splicing in downstream pathways, two passes of read mapping will be used to potentially detect novel splice junctions. 
+* `--alignSJDBoverhangMin 4`
+    * I am increasing the minimum overlap for *annotated* splice junctions to be called from the default of 3 up to 4. This is slightly more stringent and reduces potential false-positive annotated splice alignments.
+* `--alignSJoverhangMin 8`
+    * Similarly, I am increasing the minimum overlap for *un-annotated* splice junctions from the default of 5 up to 7, with the same goal of reducing false-positive novel splice alignments.
 * `--outSAMtype BAM SortedByCoordinate`
     * Outputting to a BAM file saves disk space (a hot commodity on my machine) and sorting the BAM file is handy for downstream analyses (though not necessarily required by featureCounts). 
 * `--runThreadN 8`
-    * I set this to run quickly using 8 threads. Your machine may not have 8 threads, or maybe you want to use a different number. This can be set in the `Snakefile`. **Double-check your machine's capabilities before running!**
+    * I set this to run using all 8 threads of my machine, maximizing available RAM per run. Your machine may not have 8 threads, or maybe you want to use a different number anyways. This can be set in `02_Mapping/Snakefile`. **Double-check your machine's capabilities before running!**
 
 ---
