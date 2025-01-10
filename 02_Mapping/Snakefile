@@ -26,6 +26,6 @@ rule STAR:
     params: 
         index = "02_Mapping/index",
         DBoverhangMin = 4,
-        overhangMin = 7
+        overhangMin = 8
     threads: 8
-    shell: "STAR --runThreadN {threads} --genomeDir {params.index} --readFilesIn {input.reads1} {input.reads2} --readFilesCommand zcat --twopassMode Basic --alignSJDBoverhangMin {params.DBoverhangMin} --alignSJoverhangMin {params.overhangMin} --outSAMtype BAM SortedByCoordinate --outTmpDir 02_Mapping/temp/{wildcards.group}_tmp --outFileNamePrefix 02_Mapping/aligned/{wildcards.group}-"
+    shell: "STAR --runThreadN {threads} --genomeDir {params.index} --readFilesIn {input.reads1} {input.reads2} --readFilesCommand zcat --twopassMode Basic --alignSJDBoverhangMin {params.DBoverhangMin} --alignSJoverhangMin {params.overhangMin} --outSAMtype BAM SortedByCoordinate --outTmpDir ~/{wildcards.group}_temp --outFileNamePrefix 02_Mapping/aligned/{wildcards.group}-"
