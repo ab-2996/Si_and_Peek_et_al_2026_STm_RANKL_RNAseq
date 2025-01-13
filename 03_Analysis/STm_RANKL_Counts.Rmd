@@ -57,21 +57,20 @@ to determine how many RNA reads align to each gene.
 
 ```{r}
 # Generate list of SAM files for featureCounts to use.
-align_directory<-"RNAseq_Preprocess/data/aligned"
+align_directory<-"C:/CassatLab/STm_RANKL_RNASeq/02_Mapping/aligned"
 files<-list.files(path=align_directory, full.names=TRUE, pattern="\\.bam$")
 
 # Run featureCounts on each file.
 counts <- featureCounts(files=files,
                         isGTFAnnotationFile=TRUE,
-                        annot.ext="Mus_musculus.GRCm39.113.gtf",
+                        annot.ext="C:/CassatLab/STm_RANKL_RNASeq/GRCm39/Mus_musculus.GRCm39.113.gtf",
                         GTF.featureType="exon",
                         GTF.attrType="gene_id",
                         isPairedEnd=TRUE,
-                        genome="Mus_musculus.GRCm39.dna_rm.primary_assembly.fa",
+                        genome="C:/CassatLab/STm_RANKL_RNASeq/GRCm39/Mus_musculus.GRCm39.dna_rm.primary_assembly.fa",
                         minFragLength=50,
                         nthreads=8,
                         )
-
 ```
 
 Now save the featureCounts object to file. This .txt file will be a

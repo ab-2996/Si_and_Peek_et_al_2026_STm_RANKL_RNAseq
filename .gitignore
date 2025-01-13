@@ -1,4 +1,5 @@
 .snakemake/
+.Rhistory
 01_QC/qc
 01_QC/ignore
 02_Mapping/_STARtmp
