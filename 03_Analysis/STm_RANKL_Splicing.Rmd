@@ -19,25 +19,25 @@ library(tidyverse)
 ## Build SpliceWiz Reference
 
 ```{r}
-ref_path <- file.path('splicewiz/ref')
-fasta_path = 'Mus_musculus.GRCm39.dna_rm.primary_assembly.fa'
-gtf_path = 'Mus_musculus.GRCm39.113.gtf'
+ref_path <- file.path('AltSplicing/splicewiz/ref')
+fasta_path = 'C:/CassatLab/STm_RANKL_RNASeq/GRCm39/Mus_musculus.GRCm39.dna_rm.primary_assembly.fa'
+gtf_path = 'C:/CassatLab/STm_RANKL_RNASeq/GRCm39/Mus_musculus.GRCm39.113.gtf'
 
 buildRef(
     reference_path = ref_path,
     fasta = fasta_path,
     gtf = gtf_path,
-    ontologySpecies = "Mus musculus"
+    genome_type="mm10"
 )
 ```
 
 ## Process BAM Files
 
 ```{r}
-align_directory<-"RNAseq_Preprocess/data/aligned"
+align_directory<-"C:/CassatLab/STm_RANKL_RNASeq/02_Mapping/aligned"
 bams <- findBAMS(align_directory, level = 0)
 
-pb_path <- file.path('splicewiz/pb_output')
+pb_path <- file.path('AltSplicing/splicewiz/pb_output')
 processBAM(
     bamfiles = bams$path,
     sample_names = bams$sample,
@@ -52,13 +52,20 @@ processBAM(
 ```{r}
 expr <- findSpliceWizOutput(pb_path)
 
-nxtse_path <- file.path('splicewiz/NxtSE_output')
+nxtse_path <- file.path('AltSplicing/splicewiz/NxtSE_output')
 collateData(
     Experiment = expr,
     reference_path = ref_path,
     output_path = nxtse_path,
     n_threads = 8
 )
+```
+
+```{r}
+expSetup <- read.csv("seq_reference_splice.txt", sep="\t")
+
+expr <- merge(expr,expSetup,by="sample",all.x=TRUE) %>%
+  as.data.frame()
 ```
 
 
@@ -94,7 +101,6 @@ res_DESeq <- ASE_DESeq(
 res_DESeq_Filt <- res_DESeq[res_DESeq$abs_deltaPSI > 0.05,]
 ```
 
-
 ## Plot Volcano Plot for Given Condition
 
 ```{r}
@@ -105,18 +111,13 @@ ggplot(res_DESeq_Filt,
          x = "Log2-fold change", y = "Adj. P-value (-log10)")
 ```
 
-
 ```{r}
 
 # Set up list of comparisons, numerator first, denominator second
 comp_list = list(
   list("4h_STm_100", "4h_STm_0"),
-  list("24h_STm_100", "24h_STm_0"),
   list("4h_STm_0", "4h_mock_0"),
   list("4h_mock_100", "4h_mock_0"),
-  list("24h_mock_100", "24h_mock_0"),
-  list("24h_STm_100", "24h_mock_100"),
-  list("24h_STm_100", "4h_STm_100")
 )
 
 for (x in comp_list) {
@@ -134,29 +135,29 @@ for (x in comp_list) {
   res_DESeq_Filt <- res_DESeq[res_DESeq$abs_deltaPSI > 0.05,]
   
   # Save to file for later interpretation
-  write.csv(res_DESeq_Filt, file=paste0(x[[1]],"_over_",x[[2]],".csv"))
+  write.csv(res_DESeq_Filt, file=paste0(x[[1]],"_vs_",x[[2]],".csv"))
 
 }
 ```
 
-
-
-
 ## Setup Gene Ontology
 
 ```{r}
-onto_ref_path <- file.path('splicewiz/ref')
+onto_ref_path <- file.path('AltSplicing/splicewiz/ref')
 ontology <- viewGO(onto_ref_path)
 head(ontology)
 ```
 
-
 ```{r}
 go_byASE <- goASE(
-  enrichedEventNames = res_DESeq$EventName[1:10],
-  universeEventNames = NULL,
+  enrichedEventNames = res_DESeq_Filt$EventName,
+  universeEventNames = res_DESeq$EventName,
   se = se
 )
 head(go_byASE)
+```
+
+```{r}
+plotGO(go_byASE, filter_n_terms = 12)
 ```
 

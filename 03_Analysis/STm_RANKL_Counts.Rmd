@@ -11,16 +11,14 @@ editor_options:
 **Updated by AJB Dec 18 2024**
 
 This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook of
-Andrew's work on ____________
-
+Andrew's work on \_\_\_\_\_\_\_\_\_\_\_\_
 
 An diagram of the overall RNAseq workflow is shown below. Steps in
 yellow were completed prior to this notebook. Steps in light blue are
 completed below. Teal squares represent intermediate files generated
 throughout the pipeline.
 
-![]
-(RNASeq_Pipeline.png)
+![] (RNASeq_Pipeline.png)
 
 **Required Files For this Notebook**
 
@@ -77,7 +75,8 @@ counts <- featureCounts(files=files,
 ```
 
 Now save the featureCounts object to file. This .txt file will be a
-matrix with each gene, and the number of assigned counts from each input file.
+matrix with each gene, and the number of assigned counts from each input
+file.
 
 This is a savepoint - and I've transferred this data to the INF drive. I
 will not upload the .fastq or .sam files to the INF drive to save \>
@@ -141,7 +140,6 @@ design(ddsMF) <- formula(~ rankl + time + infec)
 ddsMF <- DESeq(ddsMF)
 ```
 
-
 ```{r}
 resMF <- results(ddsMF)
 head(resMF)
@@ -159,7 +157,8 @@ resMFType <- results(ddsMF,
 head(resMFType)
 ```
 
-Now we run DESeq to determine differentially-expressed genes between individual conditions.
+Now we run DESeq to determine differentially-expressed genes between
+individual conditions.
 
 ```{r}
 dds <- DESeqDataSetFromMatrix(countData=countDataMatrix, 
@@ -171,22 +170,28 @@ dds <- DESeq(dds)
 ```
 
 Now we use a log fold change (LFC) shrinkage correction to improve gene
-ranks. This was published in [*Bioinformatics* in 2018.](https://doi.org/10.1093/bioinformatics/bty895)
+ranks. This was published in [*Bioinformatics* in
+2018.](https://doi.org/10.1093/bioinformatics/bty895)
 
 ```{r}
 # Use the LFC adjustment for each group.
 ddsLFC <- lfcShrink(dds, contrast=c("condition", "4h_STm_0", "4h_mock_0"), type="ashr")
 ```
 
-Check the available comparisons relative to a group, in this case the mock-infected non-RANKL-treated group at 4h.
+Check the available comparisons relative to a group, in this case the
+mock-infected non-RANKL-treated group at 4h.
 
 ```{r}
 summary(ddsLFC)
 ```
 
-We will use the package biomaRt to reference the Ensembl database and relates the Ensembl gene id (i.e. "ENSMUSG00000064336") to a more understandable gene name. We will merge this reference with the output folder to facilitate plotting.
+We will use the package biomaRt to reference the Ensembl database and
+relates the Ensembl gene id (i.e. "ENSMUSG00000064336") to a more
+understandable gene name. We will merge this reference with the output
+folder to facilitate plotting.
 
-This first block checks biomaRt for all possible attributes available in the *Mus musculus* database.
+This first block checks biomaRt for all possible attributes available in
+the *Mus musculus* database.
 
 ```{r}
 grcm39 = useEnsembl(biomart='ensembl', dataset="mmusculus_gene_ensembl")
@@ -194,15 +199,12 @@ grcm39 = useEnsembl(biomart='ensembl', dataset="mmusculus_gene_ensembl")
 attributeList <- listAttributes(grcm39)
 ```
 
-Now we will make the reference table with:
-- Ensembl Gene Name
-- Gene Type (i.e. coding, lncRNA, etc)
-- Gene Name (i.e. "sox9")
-- Chromosome
-- Start Position
-- Stop Position
+Now we will make the reference table with: - Ensembl Gene Name - Gene
+Type (i.e. coding, lncRNA, etc) - Gene Name (i.e. "sox9") - Chromosome -
+Start Position - Stop Position
 
-It will be saved as "grcm39_ref.txt" for future uses and so we don't need to access biomaRt the whole time.
+It will be saved as "grcm39_ref.txt" for future uses and so we don't
+need to access biomaRt the whole time.
 
 ```{r}
 all_genes <- getBM(attributes=c('ensembl_gene_id','gene_biotype','external_gene_name', 'entrezgene_id','chromosome_name','start_position','end_position'), mart = grcm39)
@@ -257,7 +259,8 @@ names(foldChange) = resFull$entrezgene_id
 head(foldChange)
 ```
 
-Now run gage on the DESeq2 dataset and examine regulation as sets of KEGG-annotated pathways.
+Now run gage on the DESeq2 dataset and examine regulation as sets of
+KEGG-annotated pathways.
 
 ```{r}
 keggres = gage(foldChange, gsets=kegg.sets.mm, same.dir=TRUE)
@@ -332,15 +335,11 @@ rownames(KeggPathDF) <- KeggPathDF$Row.names
 KeggPathDF[,1] <- NULL
 ```
 
-
-
 Now we can preview the summarized data, one by one. These data are
 listed in gene order to begin with. These commands also save the
 resulting data as *.csv* files for future reference.
 
-----
-
-
+------------------------------------------------------------------------
 
 ```{r}
 pcaData <- plotPCA(vsd, intgroup=c("condition", "type"), returnData=TRUE)
@@ -354,11 +353,10 @@ ggplot(pcaData, aes(PC1, PC2, color=condition, shape=type)) +
 pcaData
 ```
 
-
-
 ### Plotting
 
 Start with a volcano plot to visualize up- and downregulation.
+
 ```{r}
 
 SynRefSignif <- transform(SynRef, signif= ifelse(log2FoldChange>=log2(3) | log2FoldChange<=-log2(3) & padj<.001, TRUE, FALSE))
@@ -377,7 +375,3 @@ plot <- ggplot(data=SynRefSignif, aes(x=log2FoldChange, y=-log10(padj), color=si
 plot
 
 ```
-
-
-
-
