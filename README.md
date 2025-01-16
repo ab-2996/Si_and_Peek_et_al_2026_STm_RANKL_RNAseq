@@ -61,7 +61,7 @@ snakemake --snakefile 01_QC/Snakefile --use-conda --cores 8
     * Gets rid of the `.json` file.
 * `--report_title {group}`
     * Renames HTML title based on the input file. 
-* `--runThreadN 4`
+* `--thread 4`
     * I set this to run quickly using 4 threads. With 8 available on my CPU, Snakemake will run two jobs at a time. **Double-check your machine's capabilities before running!**
 
 
