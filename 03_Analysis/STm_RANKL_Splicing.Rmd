@@ -14,6 +14,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(SpliceWiz)
 library(DESeq2)
 library(tidyverse)
+library(pheatmap)
 ```
 
 ## Build SpliceWiz Reference
@@ -112,12 +113,11 @@ ggplot(res_DESeq_Filt,
 ```
 
 ```{r}
-
 # Set up list of comparisons, numerator first, denominator second
 comp_list = list(
   list("4h_STm_100", "4h_STm_0"),
   list("4h_STm_0", "4h_mock_0"),
-  list("4h_mock_100", "4h_mock_0"),
+  list("4h_mock_100", "4h_mock_0")
 )
 
 for (x in comp_list) {
@@ -135,7 +135,7 @@ for (x in comp_list) {
   res_DESeq_Filt <- res_DESeq[res_DESeq$abs_deltaPSI > 0.05,]
   
   # Save to file for later interpretation
-  write.csv(res_DESeq_Filt, file=paste0(x[[1]],"_vs_",x[[2]],".csv"))
+  write.csv(res_DESeq_Filt, file=paste0("AltSplicing/",x[[1]],"_vs_",x[[2]],".csv"), row.names = FALSE)
 
 }
 ```
@@ -159,5 +159,69 @@ head(go_byASE)
 
 ```{r}
 plotGO(go_byASE, filter_n_terms = 12)
+```
+
+## Heatmap Generation
+
+First select the top ~100 alternative splicing events from each dataset.
+I'll do this by iterating through the saved files, collecting the top __ results (when adjusted for p-val), and removing duplicates at the end.
+
+```{r}
+# Set up list of comparisons, numerator first, denominator second
+comp_list = list(
+  list("4h_STm_100", "4h_STm_0"),
+  list("4h_STm_0", "4h_mock_0"),
+  list("4h_mock_100", "4h_mock_0")
+)
+
+full_plot_df = data.frame(matrix(ncol = 26, nrow = 0))
+
+for (x in comp_list) {
+  
+  res_temp = read.csv(paste0("AltSplicing/",x[[1]],"_vs_",x[[2]],".csv"))
+  
+  subset <- res_temp %>%
+    arrange(desc(abs_deltaPSI)) %>%  # arrange in descending order
+    subset(padj <= 1e-5) %>% 
+    slice(1:100)
+  
+  names(full_plot_df) <- names(subset) 
+  
+  full_plot_df <- rbind(full_plot_df, subset)
+}
+
+full_plot_df <- full_plot_df %>% 
+  distinct(EventName)
+
+```
+
+
+
+
+```{r}
+mat <- makeMatrix(
+    se.filtered,
+    event_list = full_plot_df$EventName,
+    method = "PSI"
+)
+```
+
+```{r}
+anno_col_df <- as.data.frame(colData(se.filtered)) %>%
+    arrange(condition)
+anno_col_df <- anno_col_df[, 1, drop=FALSE]
+
+pheatmap(mat, annotation_col = anno_col_df,
+         cluster_cols = TRUE,
+         show_rownames = TRUE, 
+         show_colnames = FALSE,
+         treeheight_col = 15,
+         treeheight_row = 25,
+         scale='none',
+         cellheight=10,
+         cellwidth=20,
+         angle_col=315,
+         main = "Log2 Transformed Heatmap \n Alternative Splicing Events by % Spliced In",
+         filename="AltSplicing/test_heatmap.png")
 ```
 
