@@ -42,9 +42,17 @@ in order to determine differential expression of genes.
 # BiocManager::install("DESeq2")
 # BiocManager::install("apeglm")
 # BiocManager::install("biomaRt")
+# BiocManager::install("PCAtools")
+# BiocManager::install("ggforce")
 
 # Load Packages
 library(tidyverse)
+library(ggtext)
+library(glue)
+library(ggforce)
+library(pheatmap)
+library(ggrepel)
+
 library(Rsubread)
 library(DESeq2)
 library(ashr)
@@ -102,9 +110,17 @@ Read in the counts matrix and load into DESeq2.
 ```{r}
 # Import counts file
 cts <- as.matrix(read.table("counts.txt",sep="\t", header=TRUE))
+    
 # Import column data, saved as tab-delimited .txt, and remove spaces that head some values
 coldata <- as.matrix(read.table("seq_reference.txt", sep="\t", header=TRUE)) %>%
   trimws()
+
+# Get order of columns for counts matrix from column data
+ctsColOrder <- coldata[,1]
+# Append "GeneID" column first
+ctsColOrder <- c("GeneID",ctsColOrder)
+# Re-order counts matrix 
+cts <- cts[,ctsColOrder]
 
 # Extract counts & Ignore first column (geneID) and first row (sample names)
 countDataMatrix <- as.matrix(cts[-1,-1])
@@ -117,11 +133,10 @@ colnames(countDataMatrix) <- colnames(cts)[-1]
 
 dds <- DESeqDataSetFromMatrix(countData=countDataMatrix, 
                               colData=coldata,
-                              design = ~ c(condition,time,infec,rankl))
+                              design = ~condition)
 ```
 
 Now a brief filtering step to remove rows that have fewer than 10 reads.
-
 ```{r}
 # Filter rows with less than 10 reads.
 smallestGroupSize <- 3
@@ -129,43 +144,138 @@ keep <- rowSums(counts(dds) >= 10) >= smallestGroupSize
 dds <- dds[keep,]
 ```
 
-# Multifactor Investigation
-
-```{r}
-# Copy DESeq DataSet (DDS) to a new one for multifactor investigation
-ddsMF <- dds
-
-design(ddsMF) <- formula(~ rankl + time + infec)
-ddsMF <- DESeq(ddsMF)
-```
-
-```{r}
-resMF <- results(ddsMF)
-head(resMF)
-```
-
-```{r}
-resMFType <- results(ddsMF,
-                     contrast=c("rankl", "0", "100"))
-head(resMFType)
-```
-
-```{r}
-resMFType <- results(ddsMF,
-                     contrast=c("condition", "4h_mock_0", "4h_STm_0"))
-head(resMFType)
-```
-
 Now we run DESeq to determine differentially-expressed genes between
 individual conditions.
 
 ```{r}
-dds <- DESeqDataSetFromMatrix(countData=countDataMatrix, 
-                              colData=coldata,
-                              design = ~ condition)
-
 # Run DESeq2 for each of the comparisons:
 dds <- DESeq(dds)
+```
+
+## PCA Plots
+
+```{r}
+# Get variances from DESeq dataset.
+vsd <- vst(dds, blind=FALSE)
+# Plot PCA from variances based on condition.
+pcaData <- plotPCA(vsd, intgroup="condition", returnData=TRUE)
+```
+
+Using the R library PCAtools, we can dig in to the data.
+
+```{r}
+library(PCAtools)
+
+vst <- assay(vst(dds,blind=FALSE))
+
+pcaFull <- pca(vst, metadata=colData(dds))
+```
+
+4h PCA Plot - v1a
+
+```{r}
+# Create dataframe with rotation information (i.e. the PC1/2/3 data to plot)
+pcaPlotData <- pcaFull$rotated
+
+# Get percent information
+percentVar <- round(pcaFull$variance,2)
+
+# Make PCA Plot with ggplot2
+plot <- ggplot()+
+  ggforce::geom_mark_ellipse(aes(x=pcaPlotData$PC1,
+                                 y=pcaPlotData$PC2,
+                                 fill=pcaFull$metadata$condition),
+                             lty="blank") +
+  geom_point(aes(x=pcaPlotData$PC1,
+                 y=pcaPlotData$PC2,
+                 fill=pcaFull$metadata$condition),
+             size=3, alpha=.7, shape=21,) +
+
+  scale_fill_manual(name = "Condition",
+                    values = c(`4h_mock_0`="#048",`4h_mock_100`="#69C",
+                               `4h_STm_0`="#970",`4h_STm_100`="#EC6"),
+                    breaks = c("4h_mock_0", "4h_mock_100",
+                               "4h_STm_0", "4h_STm_100"),
+                    labels = c("Mock-0R", "Mock-100R",
+                               glue("<i>S.</i>Tm-0R"), 
+                               glue("<i>S.</i>Tm-100R"))) +
+  scale_shape(labels = c("PBS", "Vancomycin")) +
+  theme_classic() +
+  scale_x_continuous(limits=c(-40,40)) +
+  scale_y_continuous(limits=c(-30,30)) +
+  labs(title="PCA Plot - 4h",
+       color="Condition",
+       shape="Treatment") +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+  theme(axis.text=element_text(size=11, color="black"),
+        axis.title=element_text(size=11,face="bold"),
+        axis.title.y = element_text(size=12)) +
+  theme(plot.title = element_text(hjust = 0.5, size=14, face='bold')) +
+  theme(legend.position='right',
+        legend.title=element_text(face="bold", size=11),
+        legend.text=element_markdown(color = "black", size = 11))
+
+# Show plot
+plot
+ggsave("4hPCA-1a.png", width = 6, height = 4)
+```
+
+4h PCA Plot - v1b
+
+```{r}
+# Create dataframe with rotation information (i.e. the PC1/2/3 data to plot)
+pcaPlotData <- pcaFull$rotated
+
+# Get percent information
+percentVar <- round(pcaFull$variance,2)
+
+# Make PCA Plot with ggplot2
+plot <- ggplot()+
+  ggforce::geom_mark_ellipse(aes(x=pcaPlotData$PC1,
+                                 y=pcaPlotData$PC2,
+                                 fill=pcaFull$metadata$condition,
+                                 color=pcaFull$metadata$condition)) +
+  geom_point(aes(x=pcaPlotData$PC1,
+                 y=pcaPlotData$PC2,
+                 fill=pcaFull$metadata$condition),
+             size=3, alpha=.7, shape=21,) +
+  scale_fill_manual(name = "Condition",
+                    values = c(`4h_mock_0`="#048",`4h_mock_100`="#69C",
+                               `4h_STm_0`="#970",`4h_STm_100`="#EC6"),
+                    breaks = c("4h_mock_0", "4h_mock_100",
+                               "4h_STm_0", "4h_STm_100"),
+                    labels = c("Mock-0R", "Mock-100R",
+                               glue("<i>S.</i>Tm-0R"), 
+                               glue("<i>S.</i>Tm-100R"))) +
+  scale_color_manual(name = "Condition",
+                    values = c(`4h_mock_0`="#048",`4h_mock_100`="#69C",
+                               `4h_STm_0`="#970",`4h_STm_100`="#EC6"),
+                    breaks = c("4h_mock_0", "4h_mock_100",
+                               "4h_STm_0", "4h_STm_100"),
+                    labels = c("Mock-0R", "Mock-100R",
+                               glue("<i>S.</i>Tm-0R"), 
+                               glue("<i>S.</i>Tm-100R"))) +
+  scale_shape(labels = c("PBS", "Vancomycin")) +
+  theme_classic() +
+  scale_x_continuous(limits=c(-40,40)) +
+  scale_y_continuous(limits=c(-30,30)) +
+  labs(title="PCA Plot - 4h",
+       color="Condition",
+       shape="Treatment") +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+  theme(axis.text=element_text(size=11, color="black"),
+        axis.title=element_text(size=11,face="bold"),
+        axis.title.y = element_text(size=12)) +
+  theme(plot.title = element_text(hjust = 0.5, size=14, face='bold')) +
+  theme(legend.position='right',
+        legend.title=element_text(face="bold", size=11),
+        legend.text=element_markdown(color = "black", size = 11))
+
+# Show plot
+plot
+ggsave("4hPCA-1b.png", width = 6, height = 4)
 ```
 
 Now we use a log fold change (LFC) shrinkage correction to improve gene
@@ -174,7 +284,7 @@ ranks. This was published in [*Bioinformatics* in
 
 ```{r}
 # Use the LFC adjustment for each group.
-ddsLFC <- lfcShrink(dds, contrast=c("condition", "4h_STm_0", "4h_mock_0"), type="ashr")
+ddsLFC <- lfcShrink(dds, contrast=c("condition", "4h_mock_100", "4h_mock_0"), type="ashr")
 ```
 
 Check the available comparisons relative to a group, in this case the
@@ -236,9 +346,187 @@ resFull <- merge(refMatrix,resMatrix ,by="row.names",all.x=TRUE) %>%
 # Rename "row.names" column to Locus
 colnames(resFull)[colnames(resFull)=="Row.names"] <- "locus"
 
-# Save .csv for Rel-Syn results.
-#write.csv(S_4_0, file="STm_4h_0RANKL.csv", row.names=FALSE)
+# Save .csv with results.
+write.csv(resFull, file="Counts/4h_mock_100_vs_4h_mock_0.csv", row.names=FALSE)
 ```
+
+
+## Volcano Plot with Certain Genes Labeled
+
+Read in file and apply significance threshold
+Also mark genes to be labeled on plot
+```{r}
+volcanoData <- read.csv(file="Counts/4h_mock_100_vs_4h_mock_0.csv")
+
+geneLabels <- c("Oscar", "Mmp9", "Acp5", "Ctsk", "Ocstamp", "Tnf", "Il1a")
+labelData <- volcanoData |> filter(external_gene_name %in% geneLabels)
+
+```
+
+Make Volcano plot
+```{r}
+ggplot(resFull, aes(x=log2FoldChange, y=-log10(padj))) + 
+  geom_point(size=2, alpha=0.5) +
+  geom_point(data=labelData, aes(x=log2FoldChange, y=-log10(padj)),
+             size=2, alpha=0.7, color="red") +
+  geom_label_repel(data = labelData, aes(label=external_gene_name),
+                   min.segment.length=.05,
+                   box.padding=0.5,
+                   seed=1) +
+  theme_classic() +
+  scale_x_continuous(limits=c(-20,20)) +
+  scale_y_continuous(limits=c(0,400)) +
+  labs(title="Volcano Plot - Mock 0R vs 100R - 4h",
+       color="Condition",
+       shape="Treatment") +
+  xlab("log2FC") +
+  ylab("-log10(p.adj)") +
+  theme(axis.text=element_text(size=11, color="black"),
+        axis.title=element_text(size=11,face="bold"),
+        axis.title.y = element_text(size=12)) +
+  theme(plot.title = element_text(hjust = 0.5, size=14, face='bold')) +
+  theme(legend.position='right',
+        legend.title=element_text(face="bold", size=11),
+        legend.text=element_markdown(color = "black", size = 11))
+ggsave("4hVolc_Mock0vsMock100-1a.png", width = 6, height = 4)
+```
+
+Make MA plot
+```{r}
+ggplot(resFull, aes(y=log2FoldChange, x=log2(baseMean))) + 
+  geom_point(size=2, alpha=0.2) +
+  geom_point(data=labelData, aes(y=log2FoldChange, x=log2(baseMean)),
+             size=2, alpha=0.7, color="red") +
+  geom_label_repel(data = labelData, aes(label=external_gene_name),
+                  min.segment.length=.05,
+                  box.padding=0.5,
+                  seed=1) +
+  theme_classic() +
+  #scale_x_continuous(limits=c(-20,20)) +
+  #scale_y_continuous(limits=c(0,400)) +
+  labs(title="MA Plot - Mock 0R vs 100R - 4h",
+       color="Condition",
+       shape="Treatment") +
+  xlab("Log2 Mean Expression") +
+  ylab("Log2 Fold Change") +
+  theme(axis.text=element_text(size=11, color="black"),
+        axis.title=element_text(size=11,face="bold"),
+        axis.title.y = element_text(size=12)) +
+  theme(plot.title = element_text(hjust = 0.5, size=14, face='bold')) +
+  theme(legend.position='right',
+        legend.title=element_text(face="bold", size=11),
+        legend.text=element_markdown(color = "black", size = 11))
+ggsave("4hMA_Mock0vsMock100-1a.png", width = 6, height = 4)
+```
+
+
+
+
+## Heatmap using DESeq2 info
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData=countDataMatrix, 
+                              colData=coldata,
+                              design = ~condition)
+
+namedCounts <- counts(dds)
+colnames(namedCounts) <- c("4h_mock_0-1", 
+                           "4h_STm_0-1", "4h_STm_0-2", "4h_STm_0-3",
+                           "4h_STm_100-1", "4h_STm_100-2", "4h_STm_100-3", 
+                           "4h_mock_0-2", "4h_mock_0-3",
+                           "4h_mock_100-1", "4h_mock_100-2", "4h_mock_100-3"
+                       )
+write.table(
+  x=data.frame(namedCounts),
+  file="Counts/named_raw_counts.txt",
+  quote=FALSE,
+  sep="\t",
+  row.names=FALSE)
+```
+
+Now a brief filtering step to remove rows that have fewer than 10 reads.
+
+```{r}
+# Filter rows with less than 10 reads.
+smallestGroupSize <- 3
+keep <- rowSums(counts(dds) >= 10) >= smallestGroupSize
+dds <- dds[keep,]
+```
+
+Normalize raw reads using DESeq2 - a median of ratios normalization.
+
+```{r}
+ddsNorm = estimateSizeFactors(dds)
+ddsNorm = counts(ddsNorm, normalized = TRUE)
+```
+
+But these are the names of the .bam files. Let's change that with an ugly manual list.
+
+```{r}
+colnames(ddsNorm) <- c("4h_mock_0-1", 
+                       "4h_STm_0-1", "4h_STm_0-2", "4h_STm_0-3",
+                       "4h_STm_100-1", "4h_STm_100-2", "4h_STm_100-3", 
+                       "4h_mock_0-2", "4h_mock_0-3",
+                       "4h_mock_100-1", "4h_mock_100-2", "4h_mock_100-3"
+                       )
+head(ddsNorm)
+```
+
+Now save the normalized counts for each condition:
+
+```{r}
+write.table(
+  x=data.frame(ddsNorm),
+  file="Counts/named_normalized_counts.txt",
+  quote=FALSE,
+  sep="\t")
+```
+
+Now log-transform this data:
+```{r}
+ddsLog <- log2(ddsNorm+1)
+head(ddsLog)
+```
+
+Plot the 50 most differentially expressed genes from one of the datasets:
+
+```{r}
+# Import DESeq2 Output
+plotData <- read.csv("Counts/4h_STm_0_vs_4h_mock_0.csv", header=TRUE)
+
+plotNames <- plotData %>%
+    arrange(padj) %>%
+    slice_head(n = 50) 
+
+plotNames <- plotNames$locus
+
+ddsLogPlot <- ddsLog %>%
+  as.data.frame() %>% 
+  filter(mapply(`%in%`,column.names, plotNames))
+
+```
+
+
+```{r}
+pheatmap(ddsLogPlot, 
+         cluster_rows = FALSE,                      
+         cluster_cols = TRUE,
+         show_rownames = TRUE, 
+         show_colnames = TRUE,
+         treeheight_col = 25,
+         treeheight_row = 25,
+         scale='none',
+         cellheight=10,
+         cellwidth=20,
+         angle_col=315,
+         main = "Log2 Transformed Heatmap",
+         filename="Counts/heatmap_log2.png")
+```
+
+
+
+
+
 
 ```{r}
 library(pathview)
