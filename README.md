@@ -110,3 +110,10 @@ snakemake --snakefile 02_Mapping/Snakefile --use-conda --cores 8
     * I set this to run using all 8 threads of my machine, maximizing available RAM per run. Your machine may not have 8 threads, or maybe you want to use a different number anyways. This can be set in `02_Mapping/Snakefile`. **Double-check your machine's capabilities before running!**
 
 ---
+
+Differential Expression Analysis
+---
+All downstream analysis and figure generation is included in 03_Analysis/STm_RANKL_Counts.Rmd, and use the following excellent tools:
+* [Rsubread](https://bioconductor.org/packages/release/bioc/html/Rsubread.html)
+* [DESeq2](https://bioconductor.org/packages/release/bioc/html/DESeq2.html)
+* [PCATools](https://www.bioconductor.org/packages/release/bioc/html/PCAtools.html)
