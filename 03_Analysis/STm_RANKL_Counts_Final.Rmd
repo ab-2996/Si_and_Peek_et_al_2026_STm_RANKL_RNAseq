@@ -1,0 +1,711 @@
+---
+title: "STm RANKL RNAseq Analysis"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  html_notebook: default
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+**Updated by AJB Mar 18 2026**
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook of AJB's work
+with Clara's RNAseq files to make PCA Plots and single-level contrasts between
+conditions.
+
+**Required Files For this Notebook**
+
+-   The mapped reads, stored as *.bam* files.
+-   The reference genome, converted to *.gtf* format.
+
+### RNAseq Counts and Differential Expression
+
+Begin by installing and loading packages. The RNAseq analysis uses the
+package
+[Rsubread](https://bioconductor.org/packages/release/bioc/vignettes/Rsubread/inst/doc/SubreadUsersGuide.pdf)
+to generate mRNA counts for each gene. Then, this pipeline uses
+[DESeq2](https://bioconductor.org/packages/release/bioc/manuals/DESeq2/man/DESeq2.pdf)
+in order to determine differential expression of genes.
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+# IF INSTALLATION IS NECESSARY
+# if (!require("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install("Rsubread")
+# BiocManager::install("DESeq2")
+# BiocManager::install("apeglm")
+# BiocManager::install("biomaRt")
+# BiocManager::install("PCAtools")
+# BiocManager::install("ggforce")
+
+# Load Packages
+library(tidyverse)
+library(ggtext)
+library(glue)
+library(ggforce)
+library(pheatmap)
+library(ggrepel)
+library(PCAtools)
+library(Rsubread)
+library(DESeq2)
+library(ashr)
+library(ggbeeswarm)
+library(biomaRt)
+```
+
+Access the aligned reads (SAM format) and run `Rsubread-featureCounts`
+to determine how many RNA reads align to each gene.
+
+```{r}
+# Generate list of SAM files for featureCounts to use.
+align_directory<-"../02_Mapping/aligned"
+files<-list.files(path=align_directory, full.names=TRUE, pattern="\\.bam$")
+
+# Run featureCounts on each file.
+counts <- featureCounts(files=files,
+                        isGTFAnnotationFile=TRUE,
+                        annot.ext="../GRCm39/Mus_musculus.GRCm39.113.gtf",
+                        GTF.featureType="exon",
+                        GTF.attrType="gene_id",
+                        isPairedEnd=TRUE,
+                        genome="../GRCm39/Mus_musculus.GRCm39.dna_rm.primary_assembly.fa",
+                        minFragLength=50,
+                        nthreads=8,
+                        )
+```
+
+Now save the featureCounts object to file. This .txt file will be a
+matrix with each gene, and the number of assigned counts from each input
+file.
+
+```{r}
+# Write the featureCounts object to a .txt file.
+# The lapply function removes weird footers from gene names.
+write.table(
+  x=data.frame(counts$annotation["GeneID"],
+    counts$counts,
+    stringsAsFactors=FALSE) %>%
+    lapply(gsub, pattern='.t01', replacement='') %>%
+    lapply(gsub, pattern='.r01', replacement=''),
+  file="counts_all.txt",
+  quote=FALSE,
+  sep="\t",
+  row.names=FALSE)
+```
+
+Read in the counts matrix and load into DESeq2.
+Split counts into 4h- and 24h- only files for PCA plotting.
+
+```{r}
+# Import counts file
+cts <- as.matrix(read.table("counts_all.txt",sep="\t", header=TRUE))
+
+# Import reference file for 4h timepoint.
+coldata4h <- as.matrix(read.table("seq_reference_4h.txt", sep="\t", header=TRUE)) %>%
+  trimws()
+# Trim counts file to only 4h conditions
+cts4h <- cts[,c("GeneID",coldata4h[,1])]
+
+# Import reference file for 24h timepoint.
+coldata24h <- as.matrix(read.table("seq_reference_24h.txt", sep="\t", header=TRUE)) %>%
+  trimws()
+# Trim counts file to only 24h conditions
+cts24h <-cts[,c("GeneID",coldata24h[,1])]
+```
+
+### Principal Component Analysis
+
+#### 4-hour Timepoint
+
+```{r}
+# Get order of columns for counts matrix from column data
+ctsColOrder <- coldata4h[,1]
+# Append "GeneID" column first
+ctsColOrder <- c("GeneID",ctsColOrder)
+# Re-order counts matrix 
+cts4h <- cts4h[,ctsColOrder]
+
+# Extract counts & Ignore first column (geneID) and first row (sample names)
+countDataMatrix <- as.matrix(cts4h[-1,-1])
+# Convert to integer
+mode(countDataMatrix) <- "integer"
+# Set rownames to geneIDs
+rownames(countDataMatrix) <- cts4h[-1,1]
+# Set colnames to sample names
+colnames(countDataMatrix) <- colnames(cts4h)[-1]   
+
+# Make DESeq dataset from the counts matrix
+dds4h <- DESeqDataSetFromMatrix(countData=countDataMatrix, 
+                              colData=coldata4h,
+                              design = ~condition)
+
+# Filter rows with less than 10 reads.
+smallestGroupSize <- 3
+keep <- rowSums(counts(dds4h) >= 10) >= smallestGroupSize
+dds4h <- dds4h[keep,]
+
+# Run DESeq2 for each of the comparisons:
+dds4h <- DESeq(dds4h)
+```
+
+Using the R library PCAtools, perform PCA.
+```{r}
+vst <- assay(vst(dds4h,blind=FALSE))
+pca4h <- pca(vst, metadata=colData(dds4h))
+```
+
+4h PCA Plot
+
+```{r}
+# Create dataframe with rotation information (i.e. the PC1/2/3 data to plot)
+pcaPlotData <- pca4h$rotated
+
+# Get percent information
+percentVar <- round(pca4h$variance,2)
+
+# Make PCA Plot with ggplot2
+plot <- ggplot()+
+  geom_hline(yintercept=0,
+             linetype="dashed",
+             linewidth=0.5) + 
+  geom_vline(xintercept=0,
+             linetype="dashed",
+             linewidth=0.5) +
+  geom_point(aes(x=pcaPlotData$PC1,
+                 y=pcaPlotData$PC2,
+                 fill=pca4h$metadata$condition,
+                 shape=pca4h$metadata$condition),
+             size=3, alpha=.8, shape=21,) +
+  scale_fill_manual(name = "Condition",
+                    values = c(`4h_mock_0`="#FFCC34",`4h_mock_100`="#F3271F",
+                               `4h_STm_0`="#0577C1",`4h_STm_100`="#6E1077"),
+                    breaks = c("4h_mock_0", "4h_mock_100",
+                               "4h_STm_0", "4h_STm_100"),
+                    labels = c("Mock-0R", "Mock-100R",
+                               glue("<i>S</i>Tm-0R"), 
+                               glue("<i>S</i>Tm-100R"))) +
+  theme_classic() +
+  scale_x_continuous(limits=c(-40,40)) +
+  scale_y_continuous(limits=c(-30,30)) +
+  labs(title="PCA Plot - 4h",
+       fill="Condition") +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+  theme(axis.text=element_text(size=11, color="black"),
+        axis.title=element_text(size=12,face="bold"),
+        axis.title.y = element_text(size=12)) +
+  theme(plot.title = element_text(hjust = 0.5, size=14, face='bold')) +
+  theme(legend.position='right',
+        legend.title=element_text(face="bold", size=11),
+        legend.text=element_markdown(color = "black", size = 11))
+
+# Show plot
+plot
+ggsave("4hPCA_Final.png", width=6, height=4)
+```
+
+#### 24-hour Timepoint
+
+```{r}
+# Get order of columns for counts matrix from column data
+ctsColOrder <- coldata24h[,1]
+# Append "GeneID" column first
+ctsColOrder <- c("GeneID",ctsColOrder)
+# Re-order counts matrix 
+cts24h <- cts24h[,ctsColOrder]
+
+# Extract counts & Ignore first column (geneID) and first row (sample names)
+countDataMatrix <- as.matrix(cts24h[-1,-1])
+# Convert to integer
+mode(countDataMatrix) <- "integer"
+# Set rownames to geneIDs
+rownames(countDataMatrix) <- cts24h[-1,1]
+# Set colnames to sample names
+colnames(countDataMatrix) <- colnames(cts24h)[-1]   
+
+# Make DESeq dataset from the counts matrix
+dds24h <- DESeqDataSetFromMatrix(countData=countDataMatrix, 
+                              colData=coldata24h,
+                              design = ~condition)
+
+# Filter rows with less than 10 reads.
+smallestGroupSize <- 3
+keep <- rowSums(counts(dds24h) >= 10) >= smallestGroupSize
+dds24h <- dds24h[keep,]
+
+# Run DESeq2 for each of the comparisons:
+dds24h <- DESeq(dds24h)
+```
+
+Using the R library PCAtools, perform PCA.
+```{r}
+vst <- assay(vst(dds24h,blind=FALSE))
+pca24h <- pca(vst, metadata=colData(dds24h))
+```
+
+24h PCA Plot
+
+```{r}
+# Create dataframe with rotation information (i.e. the PC1/2/3 data to plot)
+pcaPlotData <- pca24h$rotated
+
+# Get percent information
+percentVar <- round(pca24h$variance,2)
+
+# Make PCA Plot with ggplot2
+plot <- ggplot()+
+  geom_hline(yintercept=0,
+             linetype="dashed",
+             linewidth=0.5) + 
+  geom_vline(xintercept=0,
+             linetype="dashed",
+             linewidth=0.5) +
+  geom_point(aes(x=pcaPlotData$PC1,
+                 y=pcaPlotData$PC2,
+                 fill=pca24h$metadata$condition),
+             size=3, alpha=.8, shape=21,) +
+  scale_fill_manual(name = "Condition",
+                    values = c(`24h_mock_0`="#FFCC34",`24h_mock_100`="#F3271F",
+                               `24h_STm_0`="#0577C1",`24h_STm_100`="#6E1077"),
+                    breaks = c("24h_mock_0", "24h_mock_100",
+                               "24h_STm_0", "24h_STm_100"),
+                    labels = c("Mock-0R", "Mock-100R",
+                               glue("<i>S</i>Tm-0R"), 
+                               glue("<i>S</i>Tm-100R"))) +
+  theme_classic() +
+  scale_x_continuous(limits=c(-55,55)) +
+  scale_y_continuous(limits=c(-45,30)) +
+  labs(title="PCA Plot - 24h",
+       fill="Condition") +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+  theme(axis.text=element_text(size=11, color="black"),
+        axis.title=element_text(size=11,face="bold"),
+        axis.title.y = element_text(size=12)) +
+  theme(plot.title = element_text(hjust = 0.5, size=14, face='bold')) +
+  theme(legend.position='right',
+        legend.title=element_text(face="bold", size=11),
+        legend.text=element_markdown(color = "black", size = 11))
+
+# Show plot
+plot
+ggsave("24hPCA_Final.png", width=6, height=4)
+```
+
+### DESeq2 Analysis
+
+Start by importing complete dataset. 
+
+```{r}
+# Import counts file
+cts <- as.matrix(read.table("counts_all.txt",sep="\t", header=TRUE))
+
+# Import column data, saved as tab-delimited .txt, and remove spaces that head some values
+coldata <- as.matrix(read.table("seq_reference_full.txt", sep="\t", header=TRUE)) %>%
+  trimws()
+
+# Get order of columns for counts matrix from column data
+ctsColOrder <- coldata[,1]
+# Append "GeneID" column first
+ctsColOrder <- c("GeneID",ctsColOrder)
+# Re-order counts matrix 
+cts <- cts[,ctsColOrder]
+
+# Extract counts & Ignore first column (geneID) and first row (sample names)
+countDataMatrix <- as.matrix(cts[-1,-1])
+# Convert to integer
+mode(countDataMatrix) <- "integer"
+# Set rownames to geneIDs
+rownames(countDataMatrix) <- cts[-1,1]
+# Set colnames to sample names
+colnames(countDataMatrix) <- colnames(cts)[-1]   
+
+dds <- DESeqDataSetFromMatrix(countData=countDataMatrix, 
+                              colData=coldata,
+                              design = ~condition)
+
+# Run DESeq2 for each of the comparisons:
+dds <- DESeq(dds)
+```
+
+Now we use a log fold change (LFC) shrinkage correction to improve gene
+ranks. This was published in [*Bioinformatics* in
+2018.](https://doi.org/10.1093/bioinformatics/bty895)
+
+```{r}
+# Use the LFC adjustment for each group.
+ddsLFC <- lfcShrink(dds, contrast=c("condition", "4h_STm_100", "4h_STm_0"), type="ashr")
+```
+
+Check the available comparisons relative to a group, in this case the
+mock-infected non-RANKL-treated group at 4h.
+
+```{r}
+summary(ddsLFC)
+```
+
+#### Import Ensembl Database
+We will use the package biomaRt to reference the Ensembl database and
+relates the Ensembl gene id (i.e. "ENSMUSG00000064336") to a more
+understandable gene name. We will merge this reference with the output
+folder to facilitate plotting.
+
+This first block checks biomaRt for all possible attributes available in
+the *Mus musculus* database.
+
+```{r}
+grcm39 = useEnsembl(biomart='ensembl', dataset="mmusculus_gene_ensembl")
+
+attributeList <- listAttributes(grcm39)
+```
+
+Now we will make the reference table with: - Ensembl Gene Name - Gene
+Type (i.e. coding, lncRNA, etc) - Gene Name (i.e. "sox9") - Chromosome -
+Start Position - Stop Position
+
+It will be saved as "grcm39_ref.txt" for future uses and so we don't
+need to access biomaRt the whole time.
+
+```{r}
+all_genes <- getBM(attributes=c('ensembl_gene_id','gene_biotype','external_gene_name', 'entrezgene_id','chromosome_name','start_position','end_position'), mart = grcm39)
+
+write.table(all_genes, file="grcm39_ref.txt",
+  quote=FALSE,
+  sep="\t",
+  row.names=FALSE)
+```
+
+#### Read-in Existing Ensembl Database
+This block reads in the reference as saved from file.
+
+```{r}
+ref <- as.matrix(read.table("grcm39_ref.txt",sep="\t", header=TRUE)) %>%
+  trimws()
+```
+
+#### Loop over desired conditions and write differential expression data
+
+```{r}
+comparison_list <- list(list("4h_STm_100", "4h_STm_0"),
+                   list("4h_mock_100", "4h_mock_0"),
+                   list("24h_STm_100", "24h_STm_0"),
+                   list("24h_mock_100", "24h_mock_0"),
+                   list("4h_STm_0", "4h_mock_0"))
+
+for (x in comparison_list) {
+
+# Use the LFC adjustment for each group.
+ddsLFC <- lfcShrink(dds, contrast=c("condition", x[[1]], x[[2]]), type="ashr")
+
+  # Set locus tags (first column) as row names.
+  refMatrix <- ref[,-1]
+  rownames(refMatrix) <- ref[,1]
+
+  # Create matrix from results.
+  resMatrix <- as.matrix(ddsLFC)
+  # Merge matrix with reference.
+  resFull <- merge(refMatrix,resMatrix ,by="row.names",all.x=TRUE) %>%
+    as.data.frame() %>%
+    drop_na()
+
+  # Rename "row.names" column to Locus
+  colnames(resFull)[colnames(resFull)=="Row.names"] <- "locus"
+
+  # Save .csv with results.
+  write.csv(resFull, file=paste0("Counts/",x[[1]],"_vs_",x[[2]],".csv"), row.names=FALSE)
+}
+
+```
+
+
+### Volcano Plot with Certain Genes Labeled
+
+#### 4h Mock 100R vs Mock 0R
+Read in file and apply significance threshold
+Also mark genes to be labeled on plot
+```{r}
+volcanoData <- read.csv(file="Counts/4h_mock_100_vs_4h_mock_0.csv")
+
+volcanoData <- transform(volcanoData, signif = ifelse(log2FoldChange<log2(3) & log2FoldChange>-log2(3) | padj>.001, "FALSE",
+                                                      ifelse(log2FoldChange>=log2(3), "UP",
+                                                            ifelse(log2FoldChange<=-log2(3),"DOWN", "NA"))))
+volcanoData <- transform(volcanoData, upperBound = ifelse(-log10(padj)>=300, TRUE, FALSE))
+volcanoData <- transform(volcanoData, upperBoundY = ifelse(-log10(padj)>=300, 1e-300, padj))
+
+geneLabels <- c("Ctsk", "Acp5", "Mmp9", "Oscar", "Tlr2", "Tlr4", "Tlr6", "Myd88", "Tirap", "Ticam1", "Ticam2", "Tnf", "Il1b", "Il6", "Ifnb1")
+labelData <- volcanoData |> filter(external_gene_name %in% geneLabels)
+
+labelData <- transform(labelData, upperBound = ifelse(-log10(padj)>=300, "hTRUE", "hFALSE"))
+```
+
+Make Volcano plot
+```{r}
+ggplot(volcanoData, aes(x=log2FoldChange, y=-log10(upperBoundY), color=signif, shape=upperBound)) + 
+  geom_point(size=1, alpha=0.7) +
+  geom_point(data=labelData, aes(x=log2FoldChange, y=-log10(upperBoundY), shape=upperBound),
+             size=1, alpha=1, color="black") +
+  geom_vline(xintercept=log2(3), linetype="dashed", color = "black") +
+  geom_vline(xintercept=-log2(3), linetype="dashed", color = "black") +
+  geom_hline(yintercept=-log10(0.001), linetype="dashed", color = "black") +
+  geom_label_repel(data = labelData, aes(label=external_gene_name),
+                   fill = alpha(c("white"),0.6),
+                   color="black",
+                   size=2.5,
+                   fontface="bold",
+                   min.segment.length=.05,
+                   box.padding=0.5,
+                   point.padding=0.1,
+                   label.size=0.3,
+                   segment.size=0.3,
+                   max.overlaps=60,
+                   seed=29) +
+  scale_color_manual(values=c("FALSE"="grey", "UP"="#dd0000", "DOWN"="#0066ff")) +
+  scale_shape_manual(values=c("FALSE"=16, "TRUE"=17, "hTRUE"=2, "hFALSE"=1)) +
+  theme_classic() +
+  scale_x_continuous(limits=c(-31,20), breaks=c(-30,-25,-20,-15,-10,-5,0,5,10,15,20)) +
+  scale_y_continuous(limits=c(0,305)) +
+  labs(title="Mock 0R vs 100R - 4h",
+       color="Condition",
+       shape="Treatment") +
+  xlab(expression(bold("log"[2]*"(Fold Change)"))) +
+  ylab(expression(bold("-log"[10]*"(FDR)"))) +
+  theme(axis.text=element_text(size=11, color="black"),
+        axis.title=element_text(size=11,face="bold"),
+        axis.title.y = element_text(size=12)) +
+  theme(plot.title = element_text(hjust = 0.5, size=14, face='bold')) +
+  theme(legend.position='none')
+ggsave("4hVolc_Mock0vsMock100_Final.png", width = 6, height = 5, dpi=600)
+```
+
+#### 4h STm 100R vs STm 0R
+Read in file and apply significance threshold
+Also mark genes to be labeled on plot
+```{r}
+volcanoData <- read.csv(file="Counts/4h_STm_100_vs_4h_STm_0.csv")
+
+volcanoData <- transform(volcanoData, signif = ifelse(log2FoldChange<log2(3) & log2FoldChange>-log2(3) | padj>.001, "FALSE",
+                                                      ifelse(log2FoldChange>=log2(3), "UP",
+                                                            ifelse(log2FoldChange<=-log2(3),"DOWN", "NA"))))
+volcanoData <- transform(volcanoData, upperBound = ifelse(-log10(padj)>=300, TRUE, FALSE))
+volcanoData <- transform(volcanoData, upperBoundY = ifelse(-log10(padj)>=300, 1e-300, padj))
+
+geneLabels <- c("Ctsk", "Acp5", "Mmp9", "Oscar", "Tlr2", "Tlr4", "Tlr6", "Myd88", "Tirap", "Ticam1", "Ticam2", "Tnf", "Il1b", "Il6", "Ifnb1")
+labelData <- volcanoData |> filter(external_gene_name %in% geneLabels)
+
+labelData <- transform(labelData, upperBound = ifelse(-log10(padj)>=300, "hTRUE", "hFALSE"))
+```
+
+Make Volcano plot
+```{r}
+ggplot(volcanoData, aes(x=log2FoldChange, y=-log10(upperBoundY), color=signif, shape=upperBound)) + 
+  geom_point(size=1, alpha=0.7) +
+  geom_point(data=labelData, aes(x=log2FoldChange, y=-log10(upperBoundY), shape=upperBound),
+             size=1, alpha=1, color="black") +
+  geom_vline(xintercept=log2(3), linetype="dashed", color = "black") +
+  geom_vline(xintercept=-log2(3), linetype="dashed", color = "black") +
+  geom_hline(yintercept=-log10(0.001), linetype="dashed", color = "black") +
+  geom_label_repel(data = labelData, aes(label=external_gene_name),
+                   fill = alpha(c("white"),0.6),
+                   color="black",
+                   size=2.5,
+                   fontface="bold",
+                   min.segment.length=.05,
+                   box.padding=0.5,
+                   point.padding=0.1,
+                   label.size=0.3,
+                   segment.size=0.3,
+                   max.overlaps=60,
+                   seed=29) +
+  scale_color_manual(values=c("FALSE"="grey", "UP"="#dd0000", "DOWN"="#0066ff")) +
+  scale_shape_manual(values=c("FALSE"=16, "TRUE"=17, "hTRUE"=2, "hFALSE"=1)) +
+  theme_classic() +
+  scale_x_continuous(limits=c(-31,20), breaks=c(-30,-25,-20,-15,-10,-5,0,5,10,15,20)) +
+  scale_y_continuous(limits=c(0,305)) +
+  labs(title="STm 0R vs 100R - 4h",
+       color="Condition",
+       shape="Treatment") +
+  xlab(expression(bold("log"[2]*"(Fold Change)"))) +
+  ylab(expression(bold("-log"[10]*"(FDR)"))) +
+  theme(axis.text=element_text(size=11, color="black"),
+        axis.title=element_text(size=11,face="bold"),
+        axis.title.y = element_text(size=12)) +
+  theme(plot.title = element_text(hjust = 0.5, size=14, face='bold')) +
+  theme(legend.position='none')
+ggsave("4hVolc_STm0vsSTm100_Final.png", width = 6, height = 5, dpi=600)
+```
+
+#### 24h Mock 100R vs Mock 0R
+Read in file and apply significance threshold
+Also mark genes to be labeled on plot
+```{r}
+volcanoData <- read.csv(file="Counts/24h_mock_100_vs_24h_mock_0.csv")
+
+volcanoData <- transform(volcanoData, signif = ifelse(log2FoldChange<log2(3) & log2FoldChange>-log2(3) | padj>.001, "FALSE",
+                                                      ifelse(log2FoldChange>=log2(3), "UP",
+                                                            ifelse(log2FoldChange<=-log2(3),"DOWN", "NA"))))
+volcanoData <- transform(volcanoData, upperBound = ifelse(-log10(padj)>=300, TRUE, FALSE))
+volcanoData <- transform(volcanoData, upperBoundY = ifelse(-log10(padj)>=300, 1e-300, padj))
+
+geneLabels <- c("Ctsk", "Acp5", "Mmp9", "Oscar", "Tlr2", "Tlr4", "Tlr6", "Myd88", "Tirap", "Ticam1", "Ticam2", "Tnf", "Il1b", "Il6", "Ifnb1")
+labelData <- volcanoData |> filter(external_gene_name %in% geneLabels)
+
+labelData <- transform(labelData, upperBound = ifelse(-log10(padj)>=300, "hTRUE", "hFALSE"))
+```
+
+Make Volcano plot
+```{r}
+ggplot(volcanoData, aes(x=log2FoldChange, y=-log10(upperBoundY), color=signif, shape=upperBound)) + 
+  geom_point(size=1, alpha=0.7) +
+  geom_point(data=labelData, aes(x=log2FoldChange, y=-log10(upperBoundY), shape=upperBound),
+             size=1, alpha=1, color="black") +
+  geom_vline(xintercept=log2(3), linetype="dashed", color = "black") +
+  geom_vline(xintercept=-log2(3), linetype="dashed", color = "black") +
+  geom_hline(yintercept=-log10(0.001), linetype="dashed", color = "black") +
+  geom_label_repel(data = labelData, aes(label=external_gene_name),
+                   fill = alpha(c("white"),0.6),
+                   color="black",
+                   size=2.5,
+                   fontface="bold",
+                   min.segment.length=.05,
+                   box.padding=0.5,
+                   point.padding=0.1,
+                   label.size=0.3,
+                   segment.size=0.3,
+                   max.overlaps=60,
+                   seed=29) +
+  scale_color_manual(values=c("FALSE"="grey", "UP"="#dd0000", "DOWN"="#0066ff")) +
+  scale_shape_manual(values=c("FALSE"=16, "TRUE"=17, "hTRUE"=2, "hFALSE"=1)) +
+  theme_classic() +
+  scale_x_continuous(limits=c(-21,20), breaks=c(-20,-15,-10,-5,0,5,10,15,20)) +
+  scale_y_continuous(limits=c(0,305)) +
+  labs(title="Mock 0R vs 100R - 24h",
+       color="Condition",
+       shape="Treatment") +
+  xlab(expression(bold("log"[2]*"(Fold Change)"))) +
+  ylab(expression(bold("-log"[10]*"(FDR)"))) +
+  theme(axis.text=element_text(size=11, color="black"),
+        axis.title=element_text(size=11,face="bold"),
+        axis.title.y = element_text(size=12)) +
+  theme(plot.title = element_text(hjust = 0.5, size=14, face='bold')) +
+  theme(legend.position='none')
+ggsave("24hVolc_Mock0vsMock100_Final.png", width = 6, height = 5, dpi=600)
+```
+
+#### 24h STm 100R vs STm 0R
+Read in file and apply significance threshold
+Also mark genes to be labeled on plot
+```{r}
+volcanoData <- read.csv(file="Counts/24h_STm_100_vs_24h_STm_0.csv")
+
+volcanoData <- transform(volcanoData, signif = ifelse(log2FoldChange<log2(3) & log2FoldChange>-log2(3) | padj>.001, "FALSE",
+                                                      ifelse(log2FoldChange>=log2(3), "UP",
+                                                            ifelse(log2FoldChange<=-log2(3),"DOWN", "NA"))))
+volcanoData <- transform(volcanoData, upperBound = ifelse(-log10(padj)>=300, TRUE, FALSE))
+volcanoData <- transform(volcanoData, upperBoundY = ifelse(-log10(padj)>=300, 1e-300, padj))
+
+geneLabels <- c("Ctsk", "Acp5", "Mmp9", "Oscar", "Tlr2", "Tlr4", "Tlr6", "Myd88", "Tirap", "Ticam1", "Ticam2", "Tnf", "Il1b", "Il6", "Ifnb1")
+labelData <- volcanoData |> filter(external_gene_name %in% geneLabels)
+
+labelData <- transform(labelData, upperBound = ifelse(-log10(padj)>=300, "hTRUE", "hFALSE"))
+
+```
+
+Make Volcano plot
+```{r}
+ggplot(volcanoData, aes(x=log2FoldChange, y=-log10(upperBoundY), color=signif, shape=upperBound)) + 
+  geom_point(size=1, alpha=0.7) +
+  geom_point(data=labelData, aes(x=log2FoldChange, y=-log10(upperBoundY), shape=upperBound),
+             size=1, alpha=1, color="black") +
+  geom_vline(xintercept=log2(3), linetype="dashed", color = "black") +
+  geom_vline(xintercept=-log2(3), linetype="dashed", color = "black") +
+  geom_hline(yintercept=-log10(0.001), linetype="dashed", color = "black") +
+  geom_label_repel(data = labelData, aes(label=external_gene_name),
+                   fill = alpha(c("white"),0.6),
+                   color="black",
+                   size=2.5,
+                   fontface="bold",
+                   min.segment.length=.05,
+                   box.padding=0.5,
+                   point.padding=0.1,
+                   label.size=0.3,
+                   segment.size=0.3,
+                   max.overlaps=60,
+                   seed=29) +
+  scale_color_manual(values=c("FALSE"="grey", "UP"="#dd0000", "DOWN"="#0066ff")) +
+  scale_shape_manual(values=c("FALSE"=16, "TRUE"=17, "hTRUE"=2, "hFALSE"=1)) +
+  theme_classic() +
+  scale_x_continuous(limits=c(-20,40), breaks=c(-20,-15,-10,-5,0,5,10,15,20,25,30,35,40)) +
+  scale_y_continuous(limits=c(0,305)) +
+  labs(title="STm 0R vs 100R - 24h",
+       color="Condition",
+       shape="Treatment") +
+  xlab(expression(bold("log"[2]*"(Fold Change)"))) +
+  ylab(expression(bold("-log"[10]*"(FDR)"))) +
+  theme(axis.text=element_text(size=11, color="black"),
+        axis.title=element_text(size=11,face="bold"),
+        axis.title.y = element_text(size=12)) +
+  theme(plot.title = element_text(hjust = 0.5, size=14, face='bold')) +
+  theme(legend.position='none')
+ggsave("24hVolc_STm0vsSTm100_Final.png", width = 6, height = 5, dpi=600)
+```
+
+#### 4h STm 0R vs STm 100R
+Read in file and apply significance threshold
+Also mark genes to be labeled on plot
+```{r}
+volcanoData <- read.csv(file="Counts/4h_STm_0_vs_4h_mock_0.csv")
+
+volcanoData <- transform(volcanoData, signif = ifelse(log2FoldChange<log2(3) & log2FoldChange>-log2(3) | padj>.001, "FALSE",
+                                                      ifelse(log2FoldChange>=log2(3), "UP",
+                                                            ifelse(log2FoldChange<=-log2(3),"DOWN", "NA"))))
+volcanoData <- transform(volcanoData, upperBound = ifelse(-log10(padj)>=300, TRUE, FALSE))
+volcanoData <- transform(volcanoData, upperBoundY = ifelse(-log10(padj)>=300, 1e-300, padj))
+
+geneLabels <- c("Ctsk", "Acp5", "Mmp9", "Oscar", "Tlr2", "Tlr4", "Tlr6", "Myd88", "Tirap", "Ticam1", "Ticam2", "Tnf", "Il1b", "Il6", "Ifnb1")
+labelData <- volcanoData |> filter(external_gene_name %in% geneLabels)
+
+labelData <- transform(labelData, upperBound = ifelse(-log10(padj)>=300, "hTRUE", "hFALSE"))
+
+```
+
+Make Volcano plot
+```{r}
+ggplot(volcanoData, aes(x=log2FoldChange, y=-log10(upperBoundY), color=signif, shape=upperBound)) + 
+  geom_point(size=1, alpha=0.7) +
+  geom_point(data=labelData, aes(x=log2FoldChange, y=-log10(upperBoundY), shape=upperBound),
+             size=1, alpha=1, color="black") +
+  geom_vline(xintercept=log2(3), linetype="dashed", color = "black") +
+  geom_vline(xintercept=-log2(3), linetype="dashed", color = "black") +
+  geom_hline(yintercept=-log10(0.001), linetype="dashed", color = "black") +
+  geom_label_repel(data = labelData, aes(label=external_gene_name),
+                   fill = alpha(c("white"),0.6),
+                   color="black",
+                   size=2.5,
+                   fontface="bold",
+                   min.segment.length=.05,
+                   box.padding=0.5,
+                   point.padding=0.1,
+                   label.size=0.3,
+                   segment.size=0.3,
+                   max.overlaps=60,
+                   seed=29) +
+  scale_color_manual(values=c("FALSE"="grey", "UP"="#dd0000", "DOWN"="#0066ff")) +
+  scale_shape_manual(values=c("FALSE"=16, "TRUE"=17, "hTRUE"=2, "hFALSE"=1)) +
+  theme_classic() +
+  scale_x_continuous(limits=c(-15,15), breaks=c(-20,-15,-10,-5,0,5,10,15,20,25,30,35,40)) +
+  scale_y_continuous(limits=c(0,305)) +
+  labs(title="STm 0R vs Mock 0R - 4h",
+       color="Condition",
+       shape="Treatment") +
+  xlab(expression(bold("log"[2]*"(Fold Change)"))) +
+  ylab(expression(bold("-log"[10]*"(FDR)"))) +
+  theme(axis.text=element_text(size=11, color="black"),
+        axis.title=element_text(size=11,face="bold"),
+        axis.title.y = element_text(size=12)) +
+  theme(plot.title = element_text(hjust = 0.5, size=14, face='bold')) +
+  theme(legend.position='none')
+ggsave("4hVolc_STm0vsMock0_Final.png", width = 6, height = 5, dpi=600)
+```
