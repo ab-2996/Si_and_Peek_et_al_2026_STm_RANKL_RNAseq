@@ -4,10 +4,6 @@ This repository contains RNA Sequencing analysis for Clara Si and Chris Peek. Th
 * Map reads to full reference genome (GRCm39) and verify initial GO/Pathway Analysis findings
 * Investigate alternative splicing events, specifically in NF-κB pathway
 
-Experimental Design
----
-*To-do, verify with Clara*
-
 Sequencing Information
 ---
 * Illumina NovaSeq 6000
