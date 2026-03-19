@@ -1,8 +1,5 @@
 *S.* Tm - RANKL Treatment RNAseq Analysis
 ===
-This repository contains RNA Sequencing analysis for Clara Si and Chris Peek. The first-pass analysis (unpublished) used pseudo-alignments to generate counts and investigate pathway regulation. Andrew Beaudoin ran the analysis in 2024-25 with two goals:
-* Map reads to full reference genome (GRCm39) and verify initial GO/Pathway Analysis findings
-* Investigate alternative splicing events, specifically in NF-κB pathway
 
 Sequencing Information
 ---
